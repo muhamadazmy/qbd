@@ -38,10 +38,61 @@ impl BlockSize {
 }
 
 pub struct Block<'a> {
-    pub index: usize,
-    pub header: Header,
-    pub crc: Crc,
-    pub block: &'a [u8],
+    cache: &'a BlockCache,
+    index: usize,
+}
+
+impl<'a> Block<'a> {
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
+    pub fn header(&self) -> Header {
+        self.cache.header()[self.index]
+    }
+
+    pub fn crc(&self) -> Crc {
+        self.cache.crc()[self.index]
+    }
+
+    pub fn data(&self) -> &[u8] {
+        self.cache.data_block(self.index)
+    }
+}
+
+pub struct BlockMut<'a> {
+    cache: &'a mut BlockCache,
+    index: usize,
+}
+
+impl<'a> BlockMut<'a> {
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
+    pub fn header(&self) -> Header {
+        self.cache.header()[self.index]
+    }
+
+    pub fn set_header(&mut self, header: Header) {
+        self.cache.header_mut()[self.index] = header;
+    }
+
+    pub fn crc(&self) -> Crc {
+        self.cache.crc()[self.index]
+    }
+
+    pub fn set_crc(&mut self, crc: Crc) {
+        self.cache.crc_mut()[self.index] = crc;
+    }
+
+    pub fn data(&self) -> &[u8] {
+        self.cache.data_block(self.index)
+    }
+
+    pub fn data_mut(&mut self) -> &mut [u8] {
+        self.cache.data_block_mut(self.index)
+    }
 }
 
 pub struct BlockCache {
@@ -119,7 +170,7 @@ impl BlockCache {
         crc
     }
 
-    fn data(&self) -> &[u8] {
+    fn data_segment(&self) -> &[u8] {
         &self.map[self.data_rng.clone()]
     }
 
@@ -131,11 +182,22 @@ impl BlockCache {
         unsafe { std::mem::transmute(&mut self.map[self.crc_rng.clone()]) }
     }
 
-    fn data_mut(&mut self) -> &mut [u8] {
+    fn data_segment_mut(&mut self) -> &mut [u8] {
         &mut self.map[self.data_rng.clone()]
     }
 
-    pub fn iter(&self) -> CacheIter {
+    fn data_block(&self, index: usize) -> &[u8] {
+        let data_offset = index * self.bs;
+        &self.data_segment()[data_offset..data_offset + self.bs]
+    }
+
+    fn data_block_mut(&mut self, index: usize) -> &mut [u8] {
+        let data_offset = index * self.bs;
+        let range = data_offset..data_offset + self.bs;
+        &mut self.data_segment_mut()[range]
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = Block> {
         CacheIter {
             cache: self,
             current: 0,
@@ -147,23 +209,25 @@ impl BlockCache {
             panic!("index out of range");
         }
 
-        let data_offset = index * self.bs;
-
-        let data = &self.data()[data_offset..data_offset + self.bs];
-
         //let data = &self.cache.data()[offset.. off]
         Block {
+            cache: self,
             index: index,
-            header: self.header()[index],
-            crc: self.crc()[index],
-            block: data,
         }
     }
 
-    pub fn at_mut(&mut self, index: usize) {
+    pub fn at_mut(&mut self, index: usize) -> BlockMut {
         // return a mut block. a mut block then
         // should allow caller to change flags, CRC or data
         // todo:
+        if index >= self.bc {
+            panic!("index out of range");
+        }
+
+        BlockMut {
+            cache: self,
+            index: index,
+        }
     }
 }
 
@@ -185,6 +249,25 @@ impl<'a> Iterator for CacheIter<'a> {
         Some(block)
     }
 }
+
+// struct CacheIterMut<'a> {
+//     cache: &'a mut BlockCache,
+//     current: usize,
+// }
+
+// impl<'a> Iterator for CacheIterMut<'a> {
+//     type Item = BlockMut<'a>;
+//     fn next(&mut self) -> Option<Self::Item> {
+//         if self.current == self.cache.bc {
+//             return None;
+//         }
+
+//         let block = self.cache.at_mut(self.current);
+//         self.current += 1;
+
+//         Some(block)
+//     }
+// }
 
 #[cfg(test)]
 mod test {
@@ -214,27 +297,28 @@ mod test {
 
     #[test]
     fn segments() {
+        const PATH: &str = "/tmp/segments.test";
         let mut cache = BlockCache::new(
-            "/tmp/segments.test",
+            PATH,
             NonZeroU16::new(10).unwrap(),
             BlockSize::Mega(NonZeroU8::new(1).unwrap()),
         )
         .unwrap();
 
         let d = Defer::new(|| {
-            std::fs::remove_file("/tmp/segments.test");
+            std::fs::remove_file(PATH).unwrap();
         });
 
         let header = cache.header_mut();
         header.fill(10.into());
         let crc = cache.crc_mut();
         crc.fill(20);
-        let data = cache.data_mut();
+        let data = cache.data_segment_mut();
         data.fill(b'D');
 
         let header = cache.header();
         let crc = cache.crc();
-        let data = cache.data();
+        let data = cache.data_segment();
 
         assert_eq!(10, header.len());
         assert_eq!(10, crc.len());
@@ -253,15 +337,16 @@ mod test {
 
     #[test]
     fn iterator() {
+        const PATH: &str = "/tmp/iter.test";
         let cache = BlockCache::new(
-            "/tmp/iter.test",
+            PATH,
             NonZeroU16::new(10).unwrap(),
             BlockSize::Mega(NonZeroU8::new(1).unwrap()),
         )
         .unwrap();
 
-        let d = Defer::new(|| {
-            std::fs::remove_file("/tmp/iter.test");
+        let _d = Defer::new(|| {
+            std::fs::remove_file(PATH).unwrap();
         });
 
         assert_eq!(10, cache.iter().count());
@@ -270,8 +355,48 @@ mod test {
             0,
             cache
                 .iter()
-                .filter(|b| b.header.flag(header::Flags::Dirty))
+                .filter(|b| b.header().flag(header::Flags::Dirty))
                 .count()
         );
+    }
+
+    #[test]
+    fn edit() {
+        const PATH: &str = "/tmp/edit.test";
+        let mut cache = BlockCache::new(
+            PATH,
+            NonZeroU16::new(10).unwrap(),
+            BlockSize::Mega(NonZeroU8::new(1).unwrap()),
+        )
+        .unwrap();
+
+        let d = Defer::new(|| {
+            std::fs::remove_file(PATH).unwrap();
+        });
+
+        let mut block = cache.at_mut(0);
+
+        block.set_header(
+            Header::default()
+                .with_id(10)
+                .with_flag(header::Flags::Occupied, true)
+                .with_flag(header::Flags::Dirty, true),
+        );
+
+        block.data_mut().fill(b'D');
+        block.set_crc(1000);
+
+        let block = cache
+            .iter()
+            .filter(|b| b.header().flag(header::Flags::Dirty))
+            .next();
+
+        assert!(block.is_some());
+
+        let block = block.unwrap();
+        assert_eq!(10, block.header().id());
+        assert_eq!(1024 * 1024, block.data().len());
+        // all data should equal to 'D' as set above
+        assert!(block.data().iter().all(|b| *b == b'D'));
     }
 }
