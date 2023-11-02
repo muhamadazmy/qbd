@@ -1,8 +1,12 @@
-//! Block cache
-//! This is a cache implementation that caches blocks on a persisted file.
-//! A cache is created over a file, the file is truncated to the needed size
+//! Block map
+//! This is a map implementation that stores blocks on a persisted file.
+//! A map is created over a file, the file is truncated to the needed size
 //! to support provided block count (bc) and block size (bs)
 //!
+//! a block is associated with a header that container information about the block
+//! (id, flags, and crc)
+//!
+//! it's up to the user of this map to make sense of the stored values
 use memmap2::MmapMut;
 use std::{
     fs::OpenOptions,
@@ -40,7 +44,7 @@ impl BlockSize {
 
 /// Block is a read-only block data from the cache
 pub struct Block<'a> {
-    cache: &'a BlockCache,
+    cache: &'a BlocksMap,
     index: usize,
 }
 
@@ -64,7 +68,7 @@ impl<'a> Block<'a> {
 
 /// BlockMut is a mut block
 pub struct BlockMut<'a> {
-    cache: &'a mut BlockCache,
+    cache: &'a mut BlocksMap,
     index: usize,
 }
 
@@ -99,7 +103,7 @@ impl<'a> BlockMut<'a> {
 }
 
 /// BlockCache is an on disk cache
-pub struct BlockCache {
+pub struct BlocksMap {
     bc: usize,
     bs: usize,
     header_rng: Range<usize>,
@@ -108,7 +112,7 @@ pub struct BlockCache {
     map: MmapMut,
 }
 
-impl BlockCache {
+impl BlocksMap {
     pub fn new<P: AsRef<Path>>(path: P, bc: NonZeroU16, bs: BlockSize) -> Result<Self> {
         // we need to have 3 segments in the file.
         // - header segment
@@ -131,7 +135,7 @@ impl BlockCache {
 
         file.set_len(size as u64)?;
         // we need then to open the underlying file and truncate it
-        Ok(BlockCache {
+        Ok(BlocksMap {
             bc,
             bs,
             header_rng: Range {
@@ -235,7 +239,7 @@ impl BlockCache {
 }
 
 struct CacheIter<'a> {
-    cache: &'a BlockCache,
+    cache: &'a BlocksMap,
     current: usize,
 }
 
@@ -301,7 +305,7 @@ mod test {
     #[test]
     fn segments() {
         const PATH: &str = "/tmp/segments.test";
-        let mut cache = BlockCache::new(
+        let mut cache = BlocksMap::new(
             PATH,
             NonZeroU16::new(10).unwrap(),
             BlockSize::Mega(NonZeroU8::new(1).unwrap()),
@@ -346,7 +350,7 @@ mod test {
     #[test]
     fn iterator() {
         const PATH: &str = "/tmp/iter.test";
-        let cache = BlockCache::new(
+        let cache = BlocksMap::new(
             PATH,
             NonZeroU16::new(10).unwrap(),
             BlockSize::Mega(NonZeroU8::new(1).unwrap()),
@@ -371,7 +375,7 @@ mod test {
     #[test]
     fn edit() {
         const PATH: &str = "/tmp/edit.test";
-        let mut cache = BlockCache::new(
+        let mut cache = BlocksMap::new(
             PATH,
             NonZeroU16::new(10).unwrap(),
             BlockSize::Mega(NonZeroU8::new(1).unwrap()),
