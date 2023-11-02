@@ -2,6 +2,7 @@ use memmap2::MmapMut;
 use std::io;
 use tokio::fs;
 
+mod cache;
 mod map;
 
 struct MapDev {

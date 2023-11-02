@@ -7,6 +7,17 @@
 //! (id, flags, and crc)
 //!
 //! it's up to the user of this map to make sense of the stored values
+//!
+//! This works by mapping a file to a memmap. The file is then split into 3 segments
+//! as follows where N is number of blocks
+//!  - Headers section, size = N * size(u64),
+//!    please check header docs
+//!  - CRC section, size = N * size(u64)
+//!  - DATA section, size = N * BS
+//!
+//! A block then is consisted of (header, crc, data) as defined by `Block`. It's up
+//! to the user of the map to calculate and set CRC. Header on the other hand has
+//! pre-defined values you can set (flags, id) but the value of `id`
 use memmap2::MmapMut;
 use std::{
     fs::OpenOptions,
@@ -17,26 +28,31 @@ use std::{
 };
 
 mod header;
-pub use header::Header;
+pub use header::{Flags, Header};
+
+pub const CRC: crc::Crc<u64> = crc::Crc::<u64>::new(&crc::CRC_64_GO_ISO);
 
 #[derive(thiserror::Error, Debug)]
-pub enum BlockCacheError {
+pub enum Error {
     #[error("io error: {0}")]
     IO(#[from] std::io::Error),
 }
 
-type Result<T> = std::result::Result<T, BlockCacheError>;
+pub type Result<T> = std::result::Result<T, Error>;
 
-type Crc = u64;
+pub type Crc = u64;
 
-/// BlockSize enum
+/// BlockSize enum. This is to force a limit on the block size that
+/// can be requests. This way maximum size that can be provided is 512 MB
 pub enum BlockSize {
+    Kilo(NonZeroU8),
     Mega(NonZeroU8),
 }
 
 impl BlockSize {
     fn bytes(&self) -> u64 {
         match &self {
+            Self::Kilo(v) => v.get() as u64 * 1024,
             Self::Mega(v) => v.get() as u64 * 1024 * 1024,
         }
     }
@@ -44,23 +60,32 @@ impl BlockSize {
 
 /// Block is a read-only block data from the cache
 pub struct Block<'a> {
-    cache: &'a BlocksMap,
+    cache: &'a BlockMap,
     index: usize,
 }
 
 impl<'a> Block<'a> {
+    /// index of the block, this is the block
+    /// position in the memmap.
     pub fn index(&self) -> usize {
         self.index
     }
 
+    /// header associated with the block
     pub fn header(&self) -> Header {
         self.cache.header()[self.index]
     }
 
+    pub fn is_crc_ok(&self) -> bool {
+        self.cache.crc()[self.index] == CRC.checksum(self.data())
+    }
+
+    /// returns crc stored on the block
     pub fn crc(&self) -> Crc {
         self.cache.crc()[self.index]
     }
 
+    /// data bytes
     pub fn data(&self) -> &[u8] {
         self.cache.data_block(self.index)
     }
@@ -68,7 +93,7 @@ impl<'a> Block<'a> {
 
 /// BlockMut is a mut block
 pub struct BlockMut<'a> {
-    cache: &'a mut BlocksMap,
+    cache: &'a mut BlockMap,
     index: usize,
 }
 
@@ -85,12 +110,17 @@ impl<'a> BlockMut<'a> {
         self.cache.header_mut()[self.index] = header;
     }
 
+    pub fn is_crc_ok(&self) -> bool {
+        self.cache.crc()[self.index] == CRC.checksum(self.data())
+    }
+
+    /// returns crc stored on the block
     pub fn crc(&self) -> Crc {
         self.cache.crc()[self.index]
     }
-
-    pub fn set_crc(&mut self, crc: Crc) {
-        self.cache.crc_mut()[self.index] = crc;
+    /// updates crc to match the data
+    pub fn update_crc(&mut self) {
+        self.cache.crc_mut()[self.index] = CRC.checksum(&self.data())
     }
 
     pub fn data(&self) -> &[u8] {
@@ -103,7 +133,7 @@ impl<'a> BlockMut<'a> {
 }
 
 /// BlockCache is an on disk cache
-pub struct BlocksMap {
+pub struct BlockMap {
     bc: usize,
     bs: usize,
     header_rng: Range<usize>,
@@ -112,7 +142,7 @@ pub struct BlocksMap {
     map: MmapMut,
 }
 
-impl BlocksMap {
+impl BlockMap {
     pub fn new<P: AsRef<Path>>(path: P, bc: NonZeroU16, bs: BlockSize) -> Result<Self> {
         // we need to have 3 segments in the file.
         // - header segment
@@ -135,7 +165,7 @@ impl BlocksMap {
 
         file.set_len(size as u64)?;
         // we need then to open the underlying file and truncate it
-        Ok(BlocksMap {
+        Ok(BlockMap {
             bc,
             bs,
             header_rng: Range {
@@ -160,12 +190,16 @@ impl BlocksMap {
     }
 
     pub fn flush(&self) -> Result<()> {
-        self.map.flush_async().map_err(BlockCacheError::from)
+        self.map.flush_async().map_err(Error::from)
     }
 
     /// capacity of cache returns max number of blocks
     pub fn cap(&self) -> usize {
         self.bc
+    }
+
+    pub fn block_size(&self) -> usize {
+        self.bs
     }
 
     fn header(&self) -> &[Header] {
@@ -239,7 +273,7 @@ impl BlocksMap {
 }
 
 struct CacheIter<'a> {
-    cache: &'a BlocksMap,
+    cache: &'a BlockMap,
     current: usize,
 }
 
@@ -305,7 +339,7 @@ mod test {
     #[test]
     fn segments() {
         const PATH: &str = "/tmp/segments.test";
-        let mut cache = BlocksMap::new(
+        let mut cache = BlockMap::new(
             PATH,
             NonZeroU16::new(10).unwrap(),
             BlockSize::Mega(NonZeroU8::new(1).unwrap()),
@@ -350,7 +384,7 @@ mod test {
     #[test]
     fn iterator() {
         const PATH: &str = "/tmp/iter.test";
-        let cache = BlocksMap::new(
+        let cache = BlockMap::new(
             PATH,
             NonZeroU16::new(10).unwrap(),
             BlockSize::Mega(NonZeroU8::new(1).unwrap()),
@@ -375,7 +409,7 @@ mod test {
     #[test]
     fn edit() {
         const PATH: &str = "/tmp/edit.test";
-        let mut cache = BlocksMap::new(
+        let mut cache = BlockMap::new(
             PATH,
             NonZeroU16::new(10).unwrap(),
             BlockSize::Mega(NonZeroU8::new(1).unwrap()),
@@ -389,14 +423,13 @@ mod test {
         let mut block = cache.at_mut(0);
 
         block.set_header(
-            Header::default()
-                .with_id(10)
+            Header::new(10)
                 .with_flag(header::Flags::Occupied, true)
                 .with_flag(header::Flags::Dirty, true),
         );
 
         block.data_mut().fill(b'D');
-        block.set_crc(1000);
+        block.update_crc();
 
         let block = cache
             .iter()
@@ -406,7 +439,7 @@ mod test {
         assert!(block.is_some());
 
         let block = block.unwrap();
-        assert_eq!(10, block.header().id());
+        assert_eq!(10, block.header().block());
         assert_eq!(1024 * 1024, block.data().len());
         // all data should equal to 'D' as set above
         assert!(block.data().iter().all(|b| *b == b'D'));
