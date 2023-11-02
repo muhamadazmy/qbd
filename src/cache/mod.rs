@@ -9,7 +9,7 @@ use std::{
     mem::size_of,
     num::{NonZeroU16, NonZeroU8},
     ops::Range,
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 mod header;
@@ -25,6 +25,7 @@ type Result<T> = std::result::Result<T, BlockCacheError>;
 
 type Crc = u64;
 
+/// BlockSize enum
 pub enum BlockSize {
     Mega(NonZeroU8),
 }
@@ -37,6 +38,7 @@ impl BlockSize {
     }
 }
 
+/// Block is a read-only block data from the cache
 pub struct Block<'a> {
     cache: &'a BlockCache,
     index: usize,
@@ -60,6 +62,7 @@ impl<'a> Block<'a> {
     }
 }
 
+/// BlockMut is a mut block
 pub struct BlockMut<'a> {
     cache: &'a mut BlockCache,
     index: usize,
@@ -95,6 +98,7 @@ impl<'a> BlockMut<'a> {
     }
 }
 
+/// BlockCache is an on disk cache
 pub struct BlockCache {
     bc: usize,
     bs: usize,
@@ -217,9 +221,6 @@ impl BlockCache {
     }
 
     pub fn at_mut(&mut self, index: usize) -> BlockMut {
-        // return a mut block. a mut block then
-        // should allow caller to change flags, CRC or data
-        // todo:
         if index >= self.bc {
             panic!("index out of range");
         }
