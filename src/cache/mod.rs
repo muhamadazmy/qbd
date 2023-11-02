@@ -179,11 +179,13 @@ impl BlockCache {
     }
 
     fn header_mut(&mut self) -> &mut [Header] {
-        unsafe { std::mem::transmute(&mut self.map[self.header_rng.clone()]) }
+        let (_, header, _) = unsafe { self.map[self.header_rng.clone()].align_to_mut::<Header>() };
+        header
     }
 
     fn crc_mut(&mut self) -> &mut [Crc] {
-        unsafe { std::mem::transmute(&mut self.map[self.crc_rng.clone()]) }
+        let (_, crc, _) = unsafe { self.map[self.crc_rng.clone()].align_to_mut::<Crc>() };
+        crc
     }
 
     fn data_segment_mut(&mut self) -> &mut [u8] {
@@ -311,11 +313,16 @@ mod test {
         });
 
         let header = cache.header_mut();
+        assert_eq!(10, header.len());
         header.fill(10.into());
+
         let crc = cache.crc_mut();
+        assert_eq!(10, crc.len());
         crc.fill(20);
+
         let data = cache.data_segment_mut();
         data.fill(b'D');
+        assert_eq!(10 * 1024 * 1024, data.len());
 
         let header = cache.header();
         let crc = cache.crc();
