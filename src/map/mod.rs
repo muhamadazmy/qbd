@@ -20,14 +20,7 @@
 //! pre-defined values you can set (flags, id) but the value of `id`
 use bytesize::ByteSize;
 use memmap2::MmapMut;
-use std::{
-    char::MAX,
-    fs::OpenOptions,
-    mem::size_of,
-    num::{NonZeroU16, NonZeroU64, NonZeroU8},
-    ops::Range,
-    path::Path,
-};
+use std::{fs::OpenOptions, mem::size_of, ops::Range, path::Path};
 
 mod header;
 pub use header::{Flags, Header};
@@ -122,7 +115,7 @@ impl<'a> BlockMut<'a> {
 
     /// updates crc to match the data
     pub fn update_crc(&mut self) {
-        self.cache.crc_mut()[self.location] = CRC.checksum(&self.data())
+        self.cache.crc_mut()[self.location] = CRC.checksum(self.data())
     }
 
     /// data stored on the block at location
@@ -219,11 +212,13 @@ impl BlockMap {
         })
     }
 
+    /// purge the entire cache
     pub fn purge(&mut self) -> Result<()> {
         self.map.fill(0);
         self.flush()
     }
 
+    /// flush a cache to disk
     pub fn flush(&self) -> Result<()> {
         self.map.flush_async().map_err(Error::from)
     }
@@ -233,6 +228,7 @@ impl BlockMap {
         self.bc
     }
 
+    /// return block size of cache
     pub fn block_size(&self) -> usize {
         self.bs
     }
@@ -276,6 +272,7 @@ impl BlockMap {
         &mut self.data_segment_mut()[range]
     }
 
+    /// iter over all blocks in cache
     pub fn iter(&self) -> impl Iterator<Item = Block> {
         CacheIter {
             cache: self,
@@ -283,6 +280,7 @@ impl BlockMap {
         }
     }
 
+    /// gets a block at location
     pub fn at(&self, location: usize) -> Block {
         if location >= self.bc {
             panic!("index out of range");
@@ -295,6 +293,7 @@ impl BlockMap {
         }
     }
 
+    /// gets a block_mut at location
     pub fn at_mut(&mut self, location: usize) -> BlockMut {
         if location >= self.bc {
             panic!("index out of range");

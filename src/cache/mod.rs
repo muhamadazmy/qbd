@@ -44,7 +44,7 @@ impl From<Error> for std::io::Error {
     }
 }
 
-/// Cache layer on top of BlocksMap. This allows tracking what block is in what map location
+/// Cache layer on top of BlockMap. This allows tracking what block is in what map location
 /// and make it easier to find which block in the map is least used so we can evict if needed
 pub struct Cache {
     cache: LruCache<u32, CachedBlock>,
@@ -100,6 +100,7 @@ impl Cache {
         Some(self.map.at(item.location))
     }
 
+    /// get a BlockMut
     pub fn get_mut(&mut self, block: u32) -> Option<BlockMut> {
         let item = self.cache.get(&block)?;
 
@@ -171,8 +172,6 @@ impl Cache {
 
 #[cfg(test)]
 mod test {
-
-    use std::num::NonZeroU8;
 
     use super::*;
 

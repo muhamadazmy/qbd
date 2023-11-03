@@ -2,7 +2,6 @@
 pub struct Header(u64);
 
 const ID_MASK: u64 = 0x00000000ffffffff;
-const FLAGS_MASK: u64 = 0xffffffff00000000;
 
 #[repr(u64)]
 pub enum Flags {
@@ -25,21 +24,21 @@ impl From<u64> for Header {
 }
 
 impl Header {
+    /// create a new header with block index
     pub fn new(block: u32) -> Self {
         Self(block as u64)
     }
+    /// gets the block index
     pub fn block(&self) -> u32 {
         (self.0 & ID_MASK) as u32
     }
 
+    /// gets if a flag is set on a header
     pub fn flag(&self, flag: Flags) -> bool {
         self.0 & flag as u64 > 0
     }
 
-    // pub fn with_block(self, id: u32) -> Self {
-    //     ((self.0 & FLAGS_MASK) | id as u64).into()
-    // }
-
+    /// sets or unsets a flag on a header
     pub fn with_flag(self, flag: Flags, on: bool) -> Self {
         match on {
             true => self.0 | flag as u64,

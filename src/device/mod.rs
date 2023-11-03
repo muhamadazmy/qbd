@@ -46,7 +46,7 @@ impl nbd_async::BlockDevice for Device {
             let to_copy = std::cmp::min(source.len(), buf.len());
             buf[..to_copy].copy_from_slice(&source[..to_copy]);
             buf = &mut buf[to_copy..];
-            if buf.len() == 0 {
+            if buf.is_empty() {
                 break;
             }
             index += 1;
@@ -79,7 +79,7 @@ impl nbd_async::BlockDevice for Device {
             block.set_header(block.header().with_flag(crate::map::Flags::Dirty, true));
 
             buf = &buf[to_copy..];
-            if buf.len() == 0 {
+            if buf.is_empty() {
                 break;
             }
             index += 1;
