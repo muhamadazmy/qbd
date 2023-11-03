@@ -1,35 +1,10 @@
 use bytesize::ByteSize;
 use clap::{ArgAction, Parser};
-use memmap2::MmapMut;
-use std::{fmt::Display, io, path::PathBuf, str::FromStr};
-use tokio::fs;
+use std::{fmt::Display, path::PathBuf, str::FromStr};
 
 mod cache;
 mod device;
 mod map;
-
-struct MapDev {
-    map: MmapMut,
-}
-
-#[async_trait::async_trait(?Send)]
-impl nbd_async::BlockDevice for MapDev {
-    async fn read(&mut self, offset: u64, buf: &mut [u8]) -> io::Result<()> {
-        let offset = offset as usize;
-        buf.copy_from_slice(&self.map[offset..offset + buf.len()]);
-        Ok(())
-    }
-    /// Write a block of data at offset.
-    async fn write(&mut self, offset: u64, buf: &[u8]) -> io::Result<()> {
-        let offset = offset as usize;
-        self.map[offset..offset + buf.len()].copy_from_slice(buf);
-        Ok(())
-    }
-    /// Flushes write buffers to the underlying storage medium
-    async fn flush(&mut self) -> io::Result<()> {
-        self.map.flush_async()
-    }
-}
 
 /// This wrapper is only to overcome the default
 /// stupid format of ByteSize which uses MB/GB units instead
@@ -100,19 +75,10 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let cache = cache::Cache::new(args.cache, cache_size, block_size)?;
-    //let cache = cache::Cache::new(args.cache, bc, bs)
-    let file = fs::OpenOptions::new()
-        .write(true)
-        .read(true)
-        .create(true)
-        .open("/tmp/disk.nbd")
-        .await?;
 
-    file.set_len(10 * 1024 * 1024).await.unwrap();
+    let device = device::Device::new(cache);
 
-    let map = unsafe { memmap2::MmapOptions::new().map_mut(&file).unwrap() };
-    let block = MapDev { map };
-    nbd_async::serve_local_nbd("/dev/nbd0", 1024, 10 * 1024, false, block).await?;
+    nbd_async::serve_local_nbd(args.nbd, 1024, cache_size.as_u64() / 1024, false, device).await?;
 
     Ok(())
 }
