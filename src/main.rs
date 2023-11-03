@@ -1,6 +1,7 @@
+use bytesize::ByteSize;
 use clap::{ArgAction, Parser};
 use memmap2::MmapMut;
-use std::{io, num::NonZeroU16, path::PathBuf};
+use std::{fmt::Display, io, path::PathBuf, str::FromStr};
 use tokio::fs;
 
 mod cache;
@@ -29,6 +30,26 @@ impl nbd_async::BlockDevice for MapDev {
     }
 }
 
+/// This wrapper is only to overcome the default
+/// stupid format of ByteSize which uses MB/GB units instead
+/// of MiB/GiB units
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BSWrapper(ByteSize);
+
+impl FromStr for BSWrapper {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let size = ByteSize::from_str(s)?;
+        Ok(Self(size))
+    }
+}
+
+impl Display for BSWrapper {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0.to_string_as(true).as_str())
+    }
+}
+
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
 #[command(name="qbd", author, version = env!("GIT_VERSION"), about, long_about = None)]
@@ -41,12 +62,13 @@ struct Args {
     #[arg(short, long)]
     cache: PathBuf,
 
+    // TODO display of
     /// cache size has to be multiple of block-size
-    #[arg(long, default_value_t=bytesize::ByteSize::gb(10))]
-    cache_size: bytesize::ByteSize,
+    #[arg(long, default_value_t=BSWrapper(bytesize::ByteSize::gib(10)))]
+    cache_size: BSWrapper,
 
-    #[arg(long, default_value_t=bytesize::ByteSize::mb(1))]
-    block_size: bytesize::ByteSize,
+    #[arg(long, default_value_t=BSWrapper(bytesize::ByteSize::mib(1)))]
+    block_size: BSWrapper,
 
     /// enable debugging logs
     #[clap(long, action=ArgAction::Count)]
@@ -69,11 +91,14 @@ async fn main() -> anyhow::Result<()> {
         })
         .init()?;
 
-    if args.cache_size.as_u64() % args.block_size.as_u64() != 0 {
+    let cache_size = args.cache_size.0;
+    let block_size = args.block_size.0;
+
+    if cache_size.as_u64() % block_size.as_u64() != 0 {
         anyhow::bail!("cache-size must be multiple of block-size");
     }
 
-    let cache = cache::Cache::new(args.cache, args.cache_size, args.block_size)?;
+    let cache = cache::Cache::new(args.cache, cache_size, block_size)?;
     //let cache = cache::Cache::new(args.cache, bc, bs)
     let file = fs::OpenOptions::new()
         .write(true)
