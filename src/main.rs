@@ -5,6 +5,7 @@ use std::{fmt::Display, io, path::PathBuf, str::FromStr};
 use tokio::fs;
 
 mod cache;
+mod device;
 mod map;
 
 struct MapDev {

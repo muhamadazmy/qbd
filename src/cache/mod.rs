@@ -2,10 +2,11 @@
 //! the idea is that this in memory cache can track which block
 //! is stored at what index
 //!
-use std::{
-    num::{NonZeroU16, NonZeroUsize},
-    path::Path,
-};
+//! the block index used in get/put operations are the full range
+//! of blocks supported by the nbd device. If using block size of
+//! 1MiB this maps to 4096TiB
+//!
+use std::{num::NonZeroUsize, path::Path};
 
 use crate::map::{Block, BlockMut, Flags, Header};
 
@@ -25,9 +26,22 @@ pub enum Error {
 pub type Result<T> = std::result::Result<T, Error>;
 /// CachedBlock holds information about blocks in lru memory
 struct CachedBlock {
-    index: usize,
+    /// location of the block in underlying cache
+    location: usize,
     // in memory information
     // about the block can be here
+}
+
+impl From<Error> for std::io::Error {
+    fn from(value: Error) -> Self {
+        use std::io::{Error as IoError, ErrorKind};
+
+        // TODO: possible different error kind
+        match value {
+            Error::MapError(MapError::IO(err)) => err,
+            _ => IoError::new(ErrorKind::InvalidInput, value),
+        }
+    }
 }
 
 /// Cache layer on top of BlocksMap. This allows tracking what block is in what map location
@@ -35,6 +49,8 @@ struct CachedBlock {
 pub struct Cache {
     cache: LruCache<u32, CachedBlock>,
     map: BlockMap,
+    bc: u64,
+    bs: u64,
 }
 
 impl Cache {
@@ -50,12 +66,25 @@ impl Cache {
                 cache.put(
                     header.block(),
                     CachedBlock {
-                        index: block.index(),
+                        location: block.location(),
                     },
                 );
             }
         }
-        Ok(Self { map, cache })
+        Ok(Self {
+            map,
+            cache,
+            bc,
+            bs: bs.as_u64(),
+        })
+    }
+
+    pub fn block_size(&self) -> u64 {
+        self.bs
+    }
+
+    pub fn block_count(&self) -> u64 {
+        self.bc
     }
 
     /// gets the block with id <block> if already in cache, other wise return None
@@ -68,21 +97,28 @@ impl Cache {
         // we first hit the mem cache see if there is a block tracked here
         let item = self.cache.get(&block)?;
 
-        Some(self.map.at(item.index))
+        Some(self.map.at(item.location))
     }
 
     pub fn get_mut(&mut self, block: u32) -> Option<BlockMut> {
         let item = self.cache.get(&block)?;
 
-        Some(self.map.at_mut(item.index))
+        Some(self.map.at_mut(item.location))
     }
 
-    pub fn put<E>(&mut self, header: Header, data: &[u8], evict: E) -> Result<()>
+    /// puts a block into cache, if the put operation requires eviction of a colder block, the cold
+    /// the evict function will be called with that evicted block.
+    /// If optional data is provided the data will be written as well to the new block.
+    ///
+    /// on success the BlockMut is returned
+    pub fn put<E>(&mut self, header: Header, data: Option<&[u8]>, evict: E) -> Result<BlockMut>
     where
         E: FnOnce(u32, Block) -> Result<()>,
     {
-        if data.len() != self.map.block_size() {
-            return Err(Error::InvalidBlockSize);
+        if let Some(data) = data {
+            if data.len() != self.map.block_size() {
+                return Err(Error::InvalidBlockSize);
+            }
         }
         // we need to find what slot. We then need to consult the cache which slot to use !
         // right ? so either the cache is not full, then we can simply assume the next free slot
@@ -92,51 +128,44 @@ impl Cache {
         // when using put we always mark this block as occupied
         let header = header.with_flag(Flags::Occupied, true);
 
+        let mut block: BlockMut;
         if self.cache.len() < self.cache.cap().get() {
             // the map still has free slots then
-            let mut block = self.map.at_mut(self.cache.len());
-            // copy the data first! at least to invalidate
-            // the crc
-            block.data_mut().copy_from_slice(data);
-            // set the header to given value
-            block.set_header(header);
-            // update the crc
-            block.update_crc();
+            block = self.map.at_mut(self.cache.len());
+        } else {
+            // other wise, we need to evict one of the blocks from the map file
+            // so wee peek into lru find out which one we can kick out first.
 
-            self.cache.push(
-                header.block(),
-                CachedBlock {
-                    index: block.index(),
-                },
-            );
+            // we know that the cache is full, so this will always return Some
+            let (block_index, item) = self.cache.peek_lru().unwrap();
+            // we need to get the block that will be evicted
+            let evicted = self.map.at(item.location);
 
-            return Ok(());
+            evict(*block_index, evicted)?;
+
+            // now set block
+            block = self.map.at_mut(item.location);
         }
 
-        // other wise, we need to evict one of the blocks from the map file
-        // so wee peek into lru find out which one we can kick out first.
+        if let Some(data) = data {
+            block.data_mut().copy_from_slice(data);
+            block.update_crc();
+        }
 
-        // we know that the cache is full, so this will always return Some
-        let (block, item) = self.cache.peek_lru().unwrap();
-        // we need to get the block that will be evicted
-        let evicted = self.map.at(item.index);
-
-        evict(*block, evicted)?;
-
-        // now set block
-        let mut block = self.map.at_mut(item.index);
-        block.data_mut().copy_from_slice(data);
         block.set_header(header);
-        block.update_crc();
 
         self.cache.push(
             header.block(),
             CachedBlock {
-                index: block.index(),
+                location: block.location(),
             },
         );
 
-        Ok(())
+        Ok(block)
+    }
+
+    pub fn flush(&self) -> Result<()> {
+        self.map.flush().map_err(Error::MapError)
     }
 }
 
@@ -161,7 +190,7 @@ mod test {
         //this block does not exist in the cache file yet.
         assert!(cache.get(20).is_none());
 
-        let result = cache.put(Header::new(20), &data, |_, _| Ok(()));
+        let result = cache.put(Header::new(20), Some(&data), |_, _| Ok(()));
         assert!(result.is_ok());
 
         let block = cache.get(20);
@@ -186,7 +215,7 @@ mod test {
         //this block does not exist in the cache file yet.
         assert!(cache.get(20).is_none());
 
-        let result = cache.put(Header::new(20), &data, |_, _| Ok(()));
+        let result = cache.put(Header::new(20), Some(&data), |_, _| Ok(()));
         assert!(result.is_ok());
 
         // drop cache

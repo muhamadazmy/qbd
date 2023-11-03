@@ -43,6 +43,8 @@ pub enum Error {
     #[error("block size is too big")]
     BlockSizeTooBig,
 
+    // #[error("block count is too big")]
+    // BlockCountTooBig,
     #[error("size must be multiple of block size")]
     SizeNotMultipleOfBlockSize,
 
@@ -56,77 +58,91 @@ pub type Crc = u64;
 /// Block is a read-only block data from the cache
 pub struct Block<'a> {
     cache: &'a BlockMap,
-    index: usize,
+    location: usize,
 }
 
 impl<'a> Block<'a> {
-    /// index of the block, this is the block
-    /// position in the memmap.
-    pub fn index(&self) -> usize {
-        self.index
+    /// location of the block in cache
+    pub fn location(&self) -> usize {
+        self.location
     }
 
     /// header associated with the block
     pub fn header(&self) -> Header {
-        self.cache.header()[self.index]
+        self.cache.header()[self.location]
     }
 
+    /// verify if data and crc match
     pub fn is_crc_ok(&self) -> bool {
-        self.cache.crc()[self.index] == CRC.checksum(self.data())
+        self.cache.crc()[self.location] == CRC.checksum(self.data())
     }
 
     /// returns crc stored on the block
     pub fn crc(&self) -> Crc {
-        self.cache.crc()[self.index]
+        self.cache.crc()[self.location]
     }
 
-    /// data bytes
+    /// data bytes stored on block at location
     pub fn data(&self) -> &[u8] {
-        self.cache.data_block(self.index)
+        self.cache.data_block(self.location)
     }
 }
 
 /// BlockMut is a mut block
 pub struct BlockMut<'a> {
     cache: &'a mut BlockMap,
-    index: usize,
+    location: usize,
 }
 
 impl<'a> BlockMut<'a> {
-    pub fn index(&self) -> usize {
-        self.index
+    /// location is the block location inside the cache
+    pub fn location(&self) -> usize {
+        self.location
     }
 
+    /// return header associated with block at location
     pub fn header(&self) -> Header {
-        self.cache.header()[self.index]
+        self.cache.header()[self.location]
     }
 
+    /// sets header associated with block at location
     pub fn set_header(&mut self, header: Header) {
-        self.cache.header_mut()[self.index] = header;
+        self.cache.header_mut()[self.location] = header;
     }
 
+    /// verify if data and crc match
     pub fn is_crc_ok(&self) -> bool {
-        self.cache.crc()[self.index] == CRC.checksum(self.data())
+        self.cache.crc()[self.location] == CRC.checksum(self.data())
     }
 
     /// returns crc stored on the block
     pub fn crc(&self) -> Crc {
-        self.cache.crc()[self.index]
-    }
-    /// updates crc to match the data
-    pub fn update_crc(&mut self) {
-        self.cache.crc_mut()[self.index] = CRC.checksum(&self.data())
+        self.cache.crc()[self.location]
     }
 
+    /// updates crc to match the data
+    pub fn update_crc(&mut self) {
+        self.cache.crc_mut()[self.location] = CRC.checksum(&self.data())
+    }
+
+    /// data stored on the block at location
     pub fn data(&self) -> &[u8] {
-        self.cache.data_block(self.index)
+        self.cache.data_block(self.location)
     }
 
     pub fn data_mut(&mut self) -> &mut [u8] {
-        self.cache.data_block_mut(self.index)
+        self.cache.data_block_mut(self.location)
     }
 }
 
+impl<'a> From<BlockMut<'a>> for Block<'a> {
+    fn from(value: BlockMut<'a>) -> Self {
+        Self {
+            cache: value.cache,
+            location: value.location,
+        }
+    }
+}
 /// BlockCache is an on disk cache
 pub struct BlockMap {
     bc: usize,
@@ -164,6 +180,12 @@ impl BlockMap {
         }
 
         let bc = size / bs;
+
+        // // we can only store u32::MAX blocks
+        // // to be able to fit it in header
+        // if bc > u32::MAX as usize {
+        //     return Err(Error::BlockCountTooBig);
+        // }
 
         let header = bc * size_of::<Header>();
         let crc = bc * size_of::<Crc>();
@@ -261,26 +283,26 @@ impl BlockMap {
         }
     }
 
-    pub fn at(&self, index: usize) -> Block {
-        if index >= self.bc {
+    pub fn at(&self, location: usize) -> Block {
+        if location >= self.bc {
             panic!("index out of range");
         }
 
         //let data = &self.cache.data()[offset.. off]
         Block {
             cache: self,
-            index: index,
+            location,
         }
     }
 
-    pub fn at_mut(&mut self, index: usize) -> BlockMut {
-        if index >= self.bc {
+    pub fn at_mut(&mut self, location: usize) -> BlockMut {
+        if location >= self.bc {
             panic!("index out of range");
         }
 
         BlockMut {
             cache: self,
-            index: index,
+            location,
         }
     }
 }
@@ -303,25 +325,6 @@ impl<'a> Iterator for CacheIter<'a> {
         Some(block)
     }
 }
-
-// struct CacheIterMut<'a> {
-//     cache: &'a mut BlockCache,
-//     current: usize,
-// }
-
-// impl<'a> Iterator for CacheIterMut<'a> {
-//     type Item = BlockMut<'a>;
-//     fn next(&mut self) -> Option<Self::Item> {
-//         if self.current == self.cache.bc {
-//             return None;
-//         }
-
-//         let block = self.cache.at_mut(self.current);
-//         self.current += 1;
-
-//         Some(block)
-//     }
-// }
 
 #[cfg(test)]
 mod test {
