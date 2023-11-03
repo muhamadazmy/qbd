@@ -2,11 +2,15 @@
 //! the idea is that this in memory cache can track which block
 //! is stored at what index
 //!
-use std::{num::NonZeroU16, path::Path};
+use std::{
+    num::{NonZeroU16, NonZeroUsize},
+    path::Path,
+};
 
 use crate::map::{Block, BlockMut, Flags, Header};
 
-use super::map::{BlockMap, BlockSize, Error as MapError};
+use super::map::{BlockMap, Error as MapError};
+use bytesize::ByteSize;
 use lru::LruCache;
 
 #[derive(thiserror::Error, Debug)]
@@ -34,9 +38,11 @@ pub struct Cache {
 }
 
 impl Cache {
-    pub fn new<P: AsRef<Path>>(path: P, bc: NonZeroU16, bs: BlockSize) -> Result<Self> {
-        let map = BlockMap::new(path, bc, bs)?;
-        let mut cache = LruCache::new(bc.into());
+    pub fn new<P: AsRef<Path>>(path: P, size: ByteSize, bs: ByteSize) -> Result<Self> {
+        let map = BlockMap::new(path, size, bs)?;
+        let bc = size.as_u64() / bs.as_u64();
+
+        let mut cache = LruCache::new(NonZeroUsize::new(bc as usize).ok_or(MapError::ZeroSize)?);
 
         for block in map.iter() {
             let header = block.header();
@@ -147,12 +153,7 @@ mod test {
         // start from clean slate
         let _ = std::fs::remove_file(PATH);
 
-        let mut cache = Cache::new(
-            PATH,
-            NonZeroU16::new(10).unwrap(),
-            BlockSize::Kilo(NonZeroU8::new(1).unwrap()),
-        )
-        .unwrap();
+        let mut cache = Cache::new(PATH, ByteSize::kib(10), ByteSize::kib(1)).unwrap();
 
         // one kilobytes of 10s
         let data: [u8; 1024] = [10; 1024];
@@ -177,12 +178,7 @@ mod test {
         // start from clean slate
         let _ = std::fs::remove_file(PATH);
 
-        let mut cache = Cache::new(
-            PATH,
-            NonZeroU16::new(10).unwrap(),
-            BlockSize::Kilo(NonZeroU8::new(1).unwrap()),
-        )
-        .unwrap();
+        let mut cache = Cache::new(PATH, ByteSize::kib(10), ByteSize::kib(1)).unwrap();
 
         // one kilobytes of 10s
         let data: [u8; 1024] = [10; 1024];
@@ -196,12 +192,7 @@ mod test {
         // drop cache
         drop(cache);
 
-        let mut cache = Cache::new(
-            PATH,
-            NonZeroU16::new(10).unwrap(),
-            BlockSize::Kilo(NonZeroU8::new(1).unwrap()),
-        )
-        .unwrap();
+        let mut cache = Cache::new(PATH, ByteSize::kib(10), ByteSize::kib(1)).unwrap();
 
         let block = cache.get(20);
         assert!(block.is_some());
