@@ -39,7 +39,6 @@ impl Cache {
         let mut cache = LruCache::new(bc.into());
 
         for block in map.iter() {
-            println!("processing block: {}", block.index());
             let header = block.header();
             if header.flag(Flags::Occupied) {
                 cache.put(
@@ -145,6 +144,9 @@ mod test {
     #[test]
     fn test_cache_new() {
         const PATH: &str = "/tmp/cache.test";
+        // start from clean slate
+        let _ = std::fs::remove_file(PATH);
+
         let mut cache = Cache::new(
             PATH,
             NonZeroU16::new(10).unwrap(),
@@ -160,6 +162,46 @@ mod test {
 
         let result = cache.put(Header::new(20), &data, |_, _| Ok(()));
         assert!(result.is_ok());
+
+        let block = cache.get(20);
+        assert!(block.is_some());
+
+        let block = block.unwrap();
+        assert!(block.is_crc_ok());
+        assert_eq!(block.data()[0], 10);
+    }
+
+    #[test]
+    fn test_cache_reload() {
+        const PATH: &str = "/tmp/cache.reload.test";
+        // start from clean slate
+        let _ = std::fs::remove_file(PATH);
+
+        let mut cache = Cache::new(
+            PATH,
+            NonZeroU16::new(10).unwrap(),
+            BlockSize::Kilo(NonZeroU8::new(1).unwrap()),
+        )
+        .unwrap();
+
+        // one kilobytes of 10s
+        let data: [u8; 1024] = [10; 1024];
+
+        //this block does not exist in the cache file yet.
+        assert!(cache.get(20).is_none());
+
+        let result = cache.put(Header::new(20), &data, |_, _| Ok(()));
+        assert!(result.is_ok());
+
+        // drop cache
+        drop(cache);
+
+        let mut cache = Cache::new(
+            PATH,
+            NonZeroU16::new(10).unwrap(),
+            BlockSize::Kilo(NonZeroU8::new(1).unwrap()),
+        )
+        .unwrap();
 
         let block = cache.get(20);
         assert!(block.is_some());
