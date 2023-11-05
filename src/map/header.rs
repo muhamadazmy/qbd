@@ -17,12 +17,6 @@ pub enum Flags {
     Dirty = 0b0000_0010 << 32,
 }
 
-impl From<u64> for Header {
-    fn from(value: u64) -> Self {
-        Self(value)
-    }
-}
-
 impl Header {
     /// create a new header with block index
     pub fn new(block: u32) -> Self {
@@ -40,11 +34,12 @@ impl Header {
 
     /// sets or unsets a flag on a header
     pub fn with_flag(self, flag: Flags, on: bool) -> Self {
-        match on {
+        let v = match on {
             true => self.0 | flag as u64,
             false => self.0 & !(flag as u64),
-        }
-        .into()
+        };
+
+        Self(v)
     }
 }
 

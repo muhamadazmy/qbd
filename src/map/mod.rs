@@ -356,13 +356,13 @@ mod test {
         const PATH: &str = "/tmp/segments.test";
         let mut cache = BlockMap::new(PATH, ByteSize::mib(10), ByteSize::mib(1)).unwrap();
 
-        let d = Defer::new(|| {
+        let _d = Defer::new(|| {
             std::fs::remove_file(PATH).unwrap();
         });
 
         let header = cache.header_mut();
         assert_eq!(10, header.len());
-        header.fill(10.into());
+        header.fill(Header::new(10));
 
         let crc = cache.crc_mut();
         assert_eq!(10, crc.len());
@@ -381,7 +381,7 @@ mod test {
         assert_eq!(10 * 1024 * 1024, data.len());
 
         for c in header.iter() {
-            assert_eq!(*c, Header::from(10));
+            assert_eq!(*c, Header::new(10));
         }
         for c in crc.iter() {
             assert_eq!(*c, 20);
@@ -394,7 +394,7 @@ mod test {
     #[test]
     fn iterator() {
         const PATH: &str = "/tmp/iter.test";
-        let mut cache = BlockMap::new(PATH, ByteSize::mib(10), ByteSize::mib(1)).unwrap();
+        let cache = BlockMap::new(PATH, ByteSize::mib(10), ByteSize::mib(1)).unwrap();
 
         let _d = Defer::new(|| {
             std::fs::remove_file(PATH).unwrap();
@@ -416,7 +416,7 @@ mod test {
         const PATH: &str = "/tmp/edit.test";
         let mut cache = BlockMap::new(PATH, ByteSize::mib(10), ByteSize::mib(1)).unwrap();
 
-        let d = Defer::new(|| {
+        let _d = Defer::new(|| {
             std::fs::remove_file(PATH).unwrap();
         });
 
