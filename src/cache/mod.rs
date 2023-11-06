@@ -176,7 +176,7 @@ impl Cache {
     }
 
     pub fn flush(&self) -> Result<()> {
-        self.map.flush_all_async().map_err(Error::MapError)
+        self.map.flush_async().map_err(Error::MapError)
     }
 }
 

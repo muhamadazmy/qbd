@@ -78,7 +78,7 @@ async fn main() -> anyhow::Result<()> {
     let registry = Arc::new(prometheus::default_registry().clone());
     tokio::spawn(prometheus_hyper::Server::run(
         registry,
-        SocketAddr::from(([127, 0, 0, 1], 0)),
+        SocketAddr::from(([127, 0, 0, 1], 9000)),
         future::pending(),
     ));
 

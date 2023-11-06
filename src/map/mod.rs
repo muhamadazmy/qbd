@@ -45,6 +45,18 @@ pub enum Error {
     IO(#[from] std::io::Error),
 }
 
+impl From<Error> for std::io::Error {
+    fn from(value: Error) -> Self {
+        use std::io::{Error as IoError, ErrorKind};
+
+        // TODO: possible different error kind
+        match value {
+            Error::IO(err) => err,
+            _ => IoError::new(ErrorKind::InvalidInput, value),
+        }
+    }
+}
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub type Crc = u64;
@@ -125,6 +137,10 @@ impl<'a> BlockMut<'a> {
 
     pub fn data_mut(&mut self) -> &mut [u8] {
         self.cache.data_block_mut(self.location)
+    }
+
+    pub fn flush(&mut self) -> Result<()> {
+        self.cache.flush_block(self.location)
     }
 }
 
@@ -213,9 +229,11 @@ impl BlockMap {
     }
 
     /// flush_block flushes a block and wait for it until it is written to disk
-    pub fn flush_block(&self, location: usize) -> Result<()> {
-        let (start, _) = self.data_block_range(location);
-        self.map.flush_range(start, self.bc)?;
+    fn flush_block(&self, location: usize) -> Result<()> {
+        let (mut start, _) = self.data_block_range(location);
+        start += self.data_rng.start;
+        log::debug!("flushing block {} [{}: {}]", location, start, self.bs);
+        self.map.flush_range(start, self.bs)?;
 
         // the header is also flushed but in async way
         self.map
@@ -224,7 +242,7 @@ impl BlockMap {
     }
 
     /// flush a cache to disk
-    pub fn flush_all_async(&self) -> Result<()> {
+    pub fn flush_async(&self) -> Result<()> {
         // self.map.flush_range(offset, len)
         self.map.flush_async().map_err(Error::from)
     }
@@ -267,6 +285,7 @@ impl BlockMap {
         &mut self.map[self.data_rng.clone()]
     }
 
+    /// returns the offset inside the data region
     #[inline]
     fn data_block_range(&self, index: usize) -> (usize, usize) {
         let data_offset = index * self.bs;

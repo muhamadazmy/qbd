@@ -116,6 +116,12 @@ impl Device {
 
             block.set_header(block.header().with_flag(Flags::Dirty, true));
 
+            // todo: this is a very heavy call that affects
+            // the max speed of the write operation
+            // may be we can schedule multiple of these later?
+            // should we use the async form ?
+            block.flush()?;
+
             buf = &buf[to_copy..];
             if buf.is_empty() {
                 break;
