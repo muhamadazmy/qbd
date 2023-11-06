@@ -1,7 +1,7 @@
 use bytesize::ByteSize;
 use clap::{ArgAction, Parser};
 use qbd::*;
-use std::{fmt::Display, path::PathBuf, str::FromStr};
+use std::{fmt::Display, future, net::SocketAddr, path::PathBuf, str::FromStr, sync::Arc};
 
 /// This wrapper is only to overcome the default
 /// stupid format of ByteSize which uses MB/GB units instead
@@ -74,6 +74,13 @@ async fn main() -> anyhow::Result<()> {
     let cache = cache::Cache::new(args.cache, cache_size, block_size)?;
 
     let device = device::Device::new(cache);
+
+    let registry = Arc::new(prometheus::default_registry().clone());
+    tokio::spawn(prometheus_hyper::Server::run(
+        registry,
+        SocketAddr::from(([127, 0, 0, 1], 0)),
+        future::pending(),
+    ));
 
     nbd_async::serve_local_nbd(args.nbd, 1024, cache_size.as_u64() / 1024, false, device).await?;
 

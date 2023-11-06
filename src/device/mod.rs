@@ -21,6 +21,8 @@ lazy_static! {
         register_int_counter!("io_wite_err", "number of write errors").unwrap();
     static ref BLOCKS_EVICTED: IntCounter =
         register_int_counter!("blocks_evicted", "number of blocks evicted").unwrap();
+
+    // TODO add histograms for both read/write and evict operations
 }
 
 struct StoreSink;
