@@ -44,6 +44,11 @@ impl From<Error> for std::io::Error {
     }
 }
 
+#[async_trait::async_trait]
+pub trait EvictSink {
+    async fn evict(&mut self, index: u32, block: Block<'_>) -> Result<()>;
+}
+
 /// Cache layer on top of BlockMap. This allows tracking what block is in what map location
 /// and make it easier to find which block in the map is least used so we can evict if needed
 pub struct Cache {
@@ -112,9 +117,14 @@ impl Cache {
     /// If optional data is provided the data will be written as well to the new block.
     ///
     /// on success the BlockMut is returned
-    pub fn put<E>(&mut self, header: Header, data: Option<&[u8]>, evict: E) -> Result<BlockMut>
+    pub async fn put<E>(
+        &mut self,
+        header: Header,
+        data: Option<&[u8]>,
+        sink: &mut E,
+    ) -> Result<BlockMut>
     where
-        E: FnOnce(u32, Block) -> Result<()>,
+        E: EvictSink,
     {
         if let Some(data) = data {
             if data.len() != self.map.block_size() {
@@ -142,7 +152,7 @@ impl Cache {
             // we need to get the block that will be evicted
             let evicted = self.map.at(item.location);
 
-            evict(*block_index, evicted)?;
+            sink.evict(*block_index, evicted).await?;
 
             // now set block
             block = self.map.at_mut(item.location);
@@ -166,7 +176,16 @@ impl Cache {
     }
 
     pub fn flush(&self) -> Result<()> {
-        self.map.flush().map_err(Error::MapError)
+        self.map.flush_all_async().map_err(Error::MapError)
+    }
+}
+
+pub struct EvictNoop;
+
+#[async_trait::async_trait]
+impl EvictSink for EvictNoop {
+    async fn evict(&mut self, _: u32, _: Block<'_>) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -175,8 +194,8 @@ mod test {
 
     use super::*;
 
-    #[test]
-    fn test_cache_new() {
+    #[tokio::test]
+    async fn test_cache_new() {
         const PATH: &str = "/tmp/cache.test";
         // start from clean slate
         let _ = std::fs::remove_file(PATH);
@@ -189,7 +208,9 @@ mod test {
         //this block does not exist in the cache file yet.
         assert!(cache.get(20).is_none());
 
-        let result = cache.put(Header::new(20), Some(&data), |_, _| Ok(()));
+        let result = cache
+            .put(Header::new(20), Some(&data), &mut EvictNoop)
+            .await;
         assert!(result.is_ok());
 
         let block = cache.get(20);
@@ -200,8 +221,8 @@ mod test {
         assert_eq!(block.data()[0], 10);
     }
 
-    #[test]
-    fn test_cache_reload() {
+    #[tokio::test]
+    async fn test_cache_reload() {
         const PATH: &str = "/tmp/cache.reload.test";
         // start from clean slate
         let _ = std::fs::remove_file(PATH);
@@ -214,7 +235,9 @@ mod test {
         //this block does not exist in the cache file yet.
         assert!(cache.get(20).is_none());
 
-        let result = cache.put(Header::new(20), Some(&data), |_, _| Ok(()));
+        let result = cache
+            .put(Header::new(20), Some(&data), &mut EvictNoop)
+            .await;
         assert!(result.is_ok());
 
         // drop cache

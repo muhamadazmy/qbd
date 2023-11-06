@@ -212,14 +212,20 @@ impl BlockMap {
         })
     }
 
-    /// purge the entire cache
-    pub fn purge(&mut self) -> Result<()> {
-        self.map.fill(0);
-        self.flush()
+    /// flush_block flushes a block and wait for it until it is written to disk
+    pub fn flush_block(&self, location: usize) -> Result<()> {
+        let (start, _) = self.data_block_range(location);
+        self.map.flush_range(start, self.bc)?;
+
+        // the header is also flushed but in async way
+        self.map
+            .flush_async_range(0, self.crc_rng.end)
+            .map_err(Error::from)
     }
 
     /// flush a cache to disk
-    pub fn flush(&self) -> Result<()> {
+    pub fn flush_all_async(&self) -> Result<()> {
+        // self.map.flush_range(offset, len)
         self.map.flush_async().map_err(Error::from)
     }
 
@@ -261,9 +267,16 @@ impl BlockMap {
         &mut self.map[self.data_rng.clone()]
     }
 
-    fn data_block(&self, index: usize) -> &[u8] {
+    #[inline]
+    fn data_block_range(&self, index: usize) -> (usize, usize) {
         let data_offset = index * self.bs;
-        &self.data_segment()[data_offset..data_offset + self.bs]
+        (data_offset, data_offset + self.bs)
+    }
+
+    #[inline]
+    fn data_block(&self, index: usize) -> &[u8] {
+        let (start, end) = self.data_block_range(index);
+        &self.data_segment()[start..end]
     }
 
     fn data_block_mut(&mut self, index: usize) -> &mut [u8] {

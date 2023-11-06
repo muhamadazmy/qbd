@@ -1,13 +1,50 @@
-use crate::{cache::Cache, map::Header};
+use crate::{
+    cache::{self, Cache, EvictSink},
+    map::{Block, Flags, Header},
+};
+use lazy_static::lazy_static;
+use prometheus::{register_int_counter, IntCounter};
 use std::io;
+
+lazy_static! {
+    static ref IO_READ_BYTES: IntCounter =
+        register_int_counter!("io_read_bytes", "number of bytes read").unwrap();
+    static ref IO_WRITE_BYTES: IntCounter =
+        register_int_counter!("io_wite_bytes", "number of bytes written").unwrap();
+    static ref IO_READ_OP: IntCounter =
+        register_int_counter!("io_read_op", "number of read io operations").unwrap();
+    static ref IO_READ_ERR: IntCounter =
+        register_int_counter!("io_read_err", "number of read errors").unwrap();
+    static ref IO_WRITE_OP: IntCounter =
+        register_int_counter!("io_wite_op", "number of write io operations").unwrap();
+    static ref IO_WRITE_ERR: IntCounter =
+        register_int_counter!("io_wite_err", "number of write errors").unwrap();
+    static ref BLOCKS_EVICTED: IntCounter =
+        register_int_counter!("blocks_evicted", "number of blocks evicted").unwrap();
+}
+
+struct StoreSink;
+
+#[async_trait::async_trait]
+impl EvictSink for StoreSink {
+    async fn evict(&mut self, _index: u32, _block: Block<'_>) -> cache::Result<()> {
+        BLOCKS_EVICTED.inc();
+
+        Ok(())
+    }
+}
 
 pub struct Device {
     cache: Cache,
+    evict: StoreSink,
 }
 
 impl Device {
     pub fn new(cache: Cache) -> Self {
-        Self { cache }
+        Self {
+            cache,
+            evict: StoreSink,
+        }
     }
 
     /// we can only map blocks index that fits in a u32.
@@ -17,11 +54,8 @@ impl Device {
 
         u32::try_from(block).map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))
     }
-}
 
-#[async_trait::async_trait(?Send)]
-impl nbd_async::BlockDevice for Device {
-    async fn read(&mut self, offset: u64, mut buf: &mut [u8]) -> io::Result<()> {
+    async fn inner_read(&mut self, offset: u64, mut buf: &mut [u8]) -> io::Result<()> {
         // find the block
 
         let mut index = self.block_of(offset)?;
@@ -38,7 +72,8 @@ impl nbd_async::BlockDevice for Device {
                 Some(block) => block,
                 None => self
                     .cache
-                    .put(Header::new(index), None, |_, _| unimplemented!())?
+                    .put(Header::new(index), None, &mut self.evict)
+                    .await?
                     .into(),
             };
 
@@ -52,12 +87,11 @@ impl nbd_async::BlockDevice for Device {
             index += 1;
             inner_offset = 0;
         }
-
         Ok(())
     }
 
     /// Write a block of data at offset.
-    async fn write(&mut self, offset: u64, mut buf: &[u8]) -> io::Result<()> {
+    async fn inner_write(&mut self, offset: u64, mut buf: &[u8]) -> io::Result<()> {
         let mut index = self.block_of(offset)?;
         let mut inner_offset = (offset % self.cache.block_size()) as usize;
 
@@ -67,16 +101,18 @@ impl nbd_async::BlockDevice for Device {
             // cold storage. this is temporary
             let mut block = match block {
                 Some(block) => block,
-                None => self
-                    .cache
-                    .put(Header::new(index), None, |_, _| unimplemented!())?,
+                None => {
+                    self.cache
+                        .put(Header::new(index), None, &mut self.evict)
+                        .await?
+                }
             };
 
             let dest = &mut block.data_mut()[inner_offset..];
             let to_copy = std::cmp::min(dest.len(), buf.len());
             dest[..to_copy].copy_from_slice(&buf[..to_copy]);
 
-            block.set_header(block.header().with_flag(crate::map::Flags::Dirty, true));
+            block.set_header(block.header().with_flag(Flags::Dirty, true));
 
             buf = &buf[to_copy..];
             if buf.is_empty() {
@@ -87,6 +123,39 @@ impl nbd_async::BlockDevice for Device {
         }
 
         Ok(())
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl nbd_async::BlockDevice for Device {
+    async fn read(&mut self, offset: u64, buf: &mut [u8]) -> io::Result<()> {
+        match self.inner_read(offset, buf).await {
+            Ok(_) => {
+                IO_READ_OP.inc();
+                IO_READ_BYTES.inc_by(buf.len() as u64);
+
+                Ok(())
+            }
+            Err(err) => {
+                IO_READ_ERR.inc();
+                Err(err)
+            }
+        }
+    }
+
+    /// Write a block of data at offset.
+    async fn write(&mut self, offset: u64, buf: &[u8]) -> io::Result<()> {
+        match self.inner_write(offset, buf).await {
+            Ok(_) => {
+                IO_WRITE_OP.inc();
+                IO_WRITE_BYTES.inc_by(buf.len() as u64);
+                Ok(())
+            }
+            Err(err) => {
+                IO_WRITE_ERR.inc();
+                Err(err)
+            }
+        }
     }
 
     /// Flushes write buffers to the underlying storage medium
