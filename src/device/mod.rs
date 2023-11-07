@@ -1,10 +1,13 @@
 use crate::{
-    cache::{self, Cache, EvictSink},
-    map::{Block, Flags, Header},
+    cache::{self, Cache, Sink},
+    map::{Block, BlockMut, Flags, Header},
+    store::{self, Store},
 };
 use lazy_static::lazy_static;
 use prometheus::{register_int_counter, IntCounter};
-use std::io;
+use std::sync::Arc;
+use std::{io, ops::Deref};
+use tokio::sync::RwLock;
 
 lazy_static! {
     static ref IO_READ_BYTES: IntCounter =
@@ -27,10 +30,27 @@ lazy_static! {
 
 const FLUSH_LENGTH: usize = 4;
 
-struct StoreSink;
+struct StoreSink<S>
+where
+    S: Store,
+{
+    store: Arc<RwLock<S>>,
+}
+
+impl<S> StoreSink<S>
+where
+    S: Store,
+{
+    fn new(store: Arc<RwLock<S>>) -> Self {
+        Self { store }
+    }
+}
 
 #[async_trait::async_trait]
-impl EvictSink for StoreSink {
+impl<S> Sink for StoreSink<S>
+where
+    S: Store,
+{
     async fn evict(&mut self, _index: u32, _block: Block<'_>) -> cache::Result<()> {
         BLOCKS_EVICTED.inc();
 
@@ -87,18 +107,27 @@ impl FlushRange {
     }
 }
 
-pub struct Device {
+pub struct Device<S>
+where
+    S: Store,
+{
     cache: Cache,
-    evict: StoreSink,
+    evict: StoreSink<S>,
     flush: FlushRange,
+    store: Arc<RwLock<S>>,
 }
 
-impl Device {
-    pub fn new(cache: Cache) -> Self {
+impl<S> Device<S>
+where
+    S: Store,
+{
+    pub fn new(cache: Cache, store: S) -> Self {
+        let store = Arc::new(RwLock::new(store));
         Self {
             cache,
-            evict: StoreSink,
+            evict: StoreSink::new(Arc::clone(&store)),
             flush: FlushRange::default(),
+            store,
         }
     }
 
@@ -108,6 +137,27 @@ impl Device {
         let block = offset as usize / self.cache.block_size();
 
         u32::try_from(block).map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))
+    }
+
+    async fn get_or_load(&mut self, index: u32) -> io::Result<BlockMut> {
+        let mut slot = self
+            .cache
+            .put(Header::new(index), None, &mut self.evict)
+            .await?;
+
+        // this is done here not by passing data directly to put
+        // because evict might also try to hold the store lock
+        // which will cause a deadlock
+        // so instead we get the block as is from cache and fill it
+        // up
+        let store = self.store.read().await;
+        let data = store.get(index).await?;
+        if let Some(data) = data {
+            slot.data_mut().copy_from_slice(&data);
+            slot.update_crc()
+        }
+
+        Ok(slot)
     }
 
     async fn inner_read(&mut self, offset: u64, mut buf: &mut [u8]) -> io::Result<()> {
@@ -125,11 +175,26 @@ impl Device {
             // cold storage. this is temporary
             let block = match block {
                 Some(block) => block,
-                None => self
-                    .cache
-                    .put(Header::new(index), None, &mut self.evict)
-                    .await?
-                    .into(),
+                None => {
+                    let mut slot = self
+                        .cache
+                        .put(Header::new(index), None, &mut self.evict)
+                        .await?;
+
+                    // this is done here not by passing data directly to put
+                    // because evict might also try to hold the store lock
+                    // which will cause a deadlock
+                    // so instead we get the block as is from cache and fill it
+                    // up
+                    let store = self.store.read().await;
+                    let data = store.get(index).await?;
+                    if let Some(data) = data {
+                        slot.data_mut().copy_from_slice(&data);
+                        slot.update_crc()
+                    }
+
+                    slot.into()
+                }
             };
 
             let source = &block.data()[inner_offset..];
@@ -157,9 +222,24 @@ impl Device {
             let mut block = match block {
                 Some(block) => block,
                 None => {
-                    self.cache
+                    let mut slot = self
+                        .cache
                         .put(Header::new(index), None, &mut self.evict)
-                        .await?
+                        .await?;
+
+                    // this is done here not by passing data directly to put
+                    // because evict might also try to hold the store lock
+                    // which will cause a deadlock
+                    // so instead we get the block as is from cache and fill it
+                    // up
+                    let store = self.store.read().await;
+                    let data = store.get(index).await?;
+                    if let Some(data) = data {
+                        slot.data_mut().copy_from_slice(&data);
+                        slot.update_crc()
+                    }
+
+                    slot
                 }
             };
 
@@ -186,7 +266,10 @@ impl Device {
 }
 
 #[async_trait::async_trait(?Send)]
-impl nbd_async::BlockDevice for Device {
+impl<S> nbd_async::BlockDevice for Device<S>
+where
+    S: Store,
+{
     async fn read(&mut self, offset: u64, buf: &mut [u8]) -> io::Result<()> {
         match self.inner_read(offset, buf).await {
             Ok(_) => {
@@ -224,6 +307,20 @@ impl nbd_async::BlockDevice for Device {
     }
 }
 
+pub struct NoStore;
+#[async_trait::async_trait]
+impl Store for NoStore {
+    async fn set(&mut self, index: u32, block: &[u8]) -> store::Result<()> {
+        unimplemented!()
+    }
+    async fn get(&self, index: u32) -> store::Result<Option<store::Data>> {
+        unimplemented!()
+    }
+    fn size(&self) -> usize {
+        unimplemented!()
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -239,7 +336,7 @@ mod test {
 
         let cache = Cache::new(PATH, ByteSize::kib(10), ByteSize::kib(1)).unwrap();
 
-        let mut dev = Device::new(cache);
+        let mut dev = Device::new(cache, NoStore);
 
         let mut buf: [u8; 512] = [1; 512];
 
@@ -271,7 +368,7 @@ mod test {
 
         let cache = Cache::new(PATH, ByteSize::kib(10), ByteSize::kib(1)).unwrap();
 
-        let mut dev = Device::new(cache);
+        let mut dev = Device::new(cache, NoStore);
 
         let mut buf: [u8; 512] = [1; 512];
 

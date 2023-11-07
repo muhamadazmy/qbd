@@ -45,7 +45,7 @@ impl From<Error> for std::io::Error {
 }
 
 #[async_trait::async_trait]
-pub trait EvictSink {
+pub trait Sink {
     async fn evict(&mut self, index: u32, block: Block<'_>) -> Result<()>;
 }
 
@@ -117,7 +117,7 @@ impl Cache {
         sink: &mut E,
     ) -> Result<BlockMut>
     where
-        E: EvictSink,
+        E: Sink,
     {
         if let Some(data) = data {
             if data.len() != self.map.block_size() {
@@ -176,7 +176,7 @@ impl Cache {
 pub struct EvictNoop;
 
 #[async_trait::async_trait]
-impl EvictSink for EvictNoop {
+impl Sink for EvictNoop {
     async fn evict(&mut self, _: u32, _: Block<'_>) -> Result<()> {
         Ok(())
     }
