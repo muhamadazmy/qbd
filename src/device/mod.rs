@@ -5,7 +5,6 @@ use crate::{
 use lazy_static::lazy_static;
 use prometheus::{register_int_counter, IntCounter};
 use std::io;
-use std::{collections::HashSet, default};
 
 lazy_static! {
     static ref IO_READ_BYTES: IntCounter =
@@ -106,7 +105,7 @@ impl Device {
     /// we can only map blocks index that fits in a u32.
     /// this is because
     pub fn block_of(&self, offset: u64) -> io::Result<u32> {
-        let block = offset / self.cache.block_size();
+        let block = offset as usize / self.cache.block_size();
 
         u32::try_from(block).map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))
     }
@@ -118,7 +117,7 @@ impl Device {
         // TODO: make sure that index is not beyond the max index size by
         // the cold store.
 
-        let mut inner_offset = (offset % self.cache.block_size()) as usize;
+        let mut inner_offset = (offset as usize % self.cache.block_size());
 
         loop {
             let block = self.cache.get(index);
@@ -149,7 +148,7 @@ impl Device {
     /// Write a block of data at offset.
     async fn inner_write(&mut self, offset: u64, mut buf: &[u8]) -> io::Result<()> {
         let mut index = self.block_of(offset)?;
-        let mut inner_offset = (offset % self.cache.block_size()) as usize;
+        let mut inner_offset = (offset as usize % self.cache.block_size());
 
         loop {
             let block = self.cache.get_mut(index);

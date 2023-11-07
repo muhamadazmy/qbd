@@ -89,7 +89,7 @@ impl<'a> Block<'a> {
 
     /// data bytes stored on block at location
     pub fn data(&self) -> &[u8] {
-        self.cache.data_block(self.location)
+        self.cache.data_at(self.location)
     }
 }
 
@@ -132,7 +132,7 @@ impl<'a> BlockMut<'a> {
 
     /// data stored on the block at location
     pub fn data(&self) -> &[u8] {
-        self.cache.data_block(self.location)
+        self.cache.data_at(self.location)
     }
 
     pub fn data_mut(&mut self) -> &mut [u8] {
@@ -241,7 +241,7 @@ impl BlockMap {
     }
 
     /// capacity of cache returns max number of blocks
-    pub fn cap(&self) -> usize {
+    pub fn block_count(&self) -> usize {
         self.bc
     }
 
@@ -286,9 +286,14 @@ impl BlockMap {
     }
 
     #[inline]
-    fn data_block(&self, index: usize) -> &[u8] {
+    pub(crate) fn data_at(&self, index: usize) -> &[u8] {
         let (start, end) = self.data_block_range(index);
         &self.data_segment()[start..end]
+    }
+
+    #[inline]
+    pub(crate) fn header_at(&self, index: usize) -> Header {
+        self.header()[index]
     }
 
     fn data_block_mut(&mut self, index: usize) -> &mut [u8] {

@@ -54,8 +54,6 @@ pub trait EvictSink {
 pub struct Cache {
     cache: LruCache<u32, CachedBlock>,
     map: BlockMap,
-    bc: u64,
-    bs: u64,
 }
 
 impl Cache {
@@ -76,20 +74,15 @@ impl Cache {
                 );
             }
         }
-        Ok(Self {
-            map,
-            cache,
-            bc,
-            bs: bs.as_u64(),
-        })
+        Ok(Self { map, cache })
     }
 
-    pub fn block_size(&self) -> u64 {
-        self.bs
+    pub fn block_size(&self) -> usize {
+        self.map.block_size()
     }
 
-    pub fn block_count(&self) -> u64 {
-        self.bc
+    pub fn block_count(&self) -> usize {
+        self.map.block_count()
     }
 
     /// gets the block with id <block> if already in cache, other wise return None
