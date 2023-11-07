@@ -5,6 +5,7 @@ use crate::{
 use lazy_static::lazy_static;
 use prometheus::{register_int_counter, IntCounter};
 use std::io;
+use std::{collections::HashSet, default};
 
 lazy_static! {
     static ref IO_READ_BYTES: IntCounter =
@@ -25,6 +26,8 @@ lazy_static! {
     // TODO add histograms for both read/write and evict operations
 }
 
+const FLUSH_LENGTH: usize = 4;
+
 struct StoreSink;
 
 #[async_trait::async_trait]
@@ -36,9 +39,59 @@ impl EvictSink for StoreSink {
     }
 }
 
+/// Flush range is a tuple of location and length
+/// of a range to be flushed
+/// [start, end[
+#[derive(Default, Clone, Copy)]
+struct FlushRange(usize, usize);
+
+impl FlushRange {
+    #[inline]
+    fn contains(&self, location: usize) -> bool {
+        location >= self.0 && location < self.1
+    }
+
+    fn start(&self) -> usize {
+        self.0
+    }
+
+    fn len(&self) -> usize {
+        self.1 - self.0
+    }
+
+    fn append(&mut self, location: usize) -> Option<Self> {
+        if self.contains(location) {
+            return None;
+        }
+
+        // [-, -, -, -]
+
+        // if this block is sequential to
+        // the current range, append it if len won't be more the
+        // allowed length
+        if location == self.1 && self.len() < FLUSH_LENGTH {
+            self.1 += 1;
+            return None;
+        }
+
+        // otherwise create a new range and flush this one
+        // and update self
+        let f = self.clone();
+        self.0 = location;
+        self.1 = location + 1;
+
+        if f.len() == 0 {
+            None
+        } else {
+            Some(f)
+        }
+    }
+}
+
 pub struct Device {
     cache: Cache,
     evict: StoreSink,
+    flush: FlushRange,
 }
 
 impl Device {
@@ -46,6 +99,7 @@ impl Device {
         Self {
             cache,
             evict: StoreSink,
+            flush: FlushRange::default(),
         }
     }
 
@@ -116,11 +170,9 @@ impl Device {
 
             block.set_header(block.header().with_flag(Flags::Dirty, true));
 
-            // todo: this is a very heavy call that affects
-            // the max speed of the write operation
-            // may be we can schedule multiple of these later?
-            // should we use the async form ?
-            block.flush()?;
+            if let Some(flush) = self.flush.append(block.location()) {
+                block.map().flush_blocks(flush.start(), flush.len())?;
+            }
 
             buf = &buf[to_copy..];
             if buf.is_empty() {
@@ -252,5 +304,38 @@ mod test {
         assert!(result.is_ok());
         assert!(buf[..512].iter().all(|v| *v == 2));
         assert!(buf[512..1024].iter().all(|v| *v == 3));
+    }
+
+    #[test]
+    fn flush_range() {
+        let mut range = FlushRange::default();
+        assert!(range.append(1).is_none());
+        assert!(range.append(1).is_none());
+        assert!(range.append(1).is_none());
+        assert!(range.append(2).is_none());
+        assert!(range.append(3).is_none());
+
+        let flush = range.append(5);
+        assert!(flush.is_some());
+        let flush = flush.unwrap();
+        assert_eq!(flush.start(), 1);
+        assert_eq!(flush.len(), 3);
+
+        assert_eq!(range.start(), 5);
+        assert_eq!(range.len(), 1);
+
+        assert!(range.append(6).is_none());
+        assert!(range.append(7).is_none());
+        assert!(range.append(8).is_none());
+        // this one will make it flush because there are more than 4 blocks
+        // in the range
+        let flush = range.append(9);
+        assert!(flush.is_some());
+
+        let flush = flush.unwrap();
+        assert_eq!(flush.start(), 5);
+        assert_eq!(flush.len(), 4);
+        assert_eq!(range.start(), 9);
+        assert_eq!(range.len(), 1);
     }
 }

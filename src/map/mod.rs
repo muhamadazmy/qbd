@@ -20,13 +20,15 @@
 //! pre-defined values you can set (flags, id) but the value of `id`
 use bytesize::ByteSize;
 use memmap2::MmapMut;
-use std::{fs::OpenOptions, mem::size_of, ops::Range, path::Path};
+use std::{fs::OpenOptions, io, mem::size_of, ops::Range, os::fd::AsRawFd, path::Path};
 
 mod header;
 pub use header::{Flags, Header};
 
 pub const MAX_BLOCK_SIZE: ByteSize = ByteSize::mb(5);
 pub const CRC: crc::Crc<u64> = crc::Crc::<u64>::new(&crc::CRC_64_GO_ISO);
+const FS_NOCOW_FL: i64 = 0x00800000;
+use std::io::{Error as IoError, ErrorKind};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -42,13 +44,11 @@ pub enum Error {
     SizeNotMultipleOfBlockSize,
 
     #[error("io error: {0}")]
-    IO(#[from] std::io::Error),
+    IO(#[from] IoError),
 }
 
 impl From<Error> for std::io::Error {
     fn from(value: Error) -> Self {
-        use std::io::{Error as IoError, ErrorKind};
-
         // TODO: possible different error kind
         match value {
             Error::IO(err) => err,
@@ -142,6 +142,11 @@ impl<'a> BlockMut<'a> {
     pub fn flush(&mut self) -> Result<()> {
         self.cache.flush_block(self.location)
     }
+
+    /// map returns the underlying BlockMap for that block
+    pub fn map(&mut self) -> &mut BlockMap {
+        self.cache
+    }
 }
 
 impl<'a> From<BlockMut<'a>> for Block<'a> {
@@ -207,6 +212,13 @@ impl BlockMap {
             .write(true)
             .open(path)?;
 
+        unsafe {
+            let v = ioctls::fs_ioc_setflags(file.as_raw_fd(), &FS_NOCOW_FL);
+            if v != 0 {
+                log::error!("failed to disable COW: {v}");
+            }
+        }
+
         file.set_len(size as u64)?;
         // we need then to open the underlying file and truncate it
         Ok(BlockMap {
@@ -226,25 +238,6 @@ impl BlockMap {
             },
             map: unsafe { MmapMut::map_mut(&file)? },
         })
-    }
-
-    /// flush_block flushes a block and wait for it until it is written to disk
-    fn flush_block(&self, location: usize) -> Result<()> {
-        let (mut start, _) = self.data_block_range(location);
-        start += self.data_rng.start;
-        log::debug!("flushing block {} [{}: {}]", location, start, self.bs);
-        self.map.flush_range(start, self.bs)?;
-
-        // the header is also flushed but in async way
-        self.map
-            .flush_async_range(0, self.crc_rng.end)
-            .map_err(Error::from)
-    }
-
-    /// flush a cache to disk
-    pub fn flush_async(&self) -> Result<()> {
-        // self.map.flush_range(offset, len)
-        self.map.flush_async().map_err(Error::from)
     }
 
     /// capacity of cache returns max number of blocks
@@ -335,6 +328,30 @@ impl BlockMap {
             cache: self,
             location,
         }
+    }
+
+    /// flush_block flushes a block and wait for it until it is written to disk
+    pub fn flush_block(&self, location: usize) -> Result<()> {
+        self.flush_blocks(location, 1)
+    }
+
+    pub fn flush_blocks(&self, location: usize, count: usize) -> Result<()> {
+        let (mut start, _) = self.data_block_range(location);
+        start += self.data_rng.start;
+        let len = self.bs * count;
+        log::debug!("flushing block {location}/{count} [{start}: {len}]");
+        self.map.flush_async_range(start, len)?;
+
+        // the header is also flushed but in async way
+        self.map
+            .flush_async_range(0, self.crc_rng.end)
+            .map_err(Error::from)
+    }
+
+    /// flush a cache to disk
+    pub fn flush_async(&self) -> Result<()> {
+        // self.map.flush_range(offset, len)
+        self.map.flush_async().map_err(Error::from)
     }
 }
 
