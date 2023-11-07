@@ -6,7 +6,7 @@
 //! of blocks supported by the nbd device. If using block size of
 //! 1MiB this maps to 4096TiB
 //!
-use std::{num::NonZeroUsize, path::Path};
+use std::{io, num::NonZeroUsize, path::Path};
 
 use crate::map::{Block, BlockMut, Flags, Header};
 
@@ -21,6 +21,9 @@ pub enum Error {
 
     #[error("map error: {0}")]
     MapError(#[from] MapError),
+
+    #[error("io error: {0}")]
+    IO(#[from] io::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -38,6 +41,7 @@ impl From<Error> for std::io::Error {
 
         // TODO: possible different error kind
         match value {
+            Error::IO(err) => err,
             Error::MapError(MapError::IO(err)) => err,
             _ => IoError::new(ErrorKind::InvalidInput, value),
         }
@@ -169,7 +173,8 @@ impl Cache {
     }
 
     pub fn flush(&self) -> Result<()> {
-        self.map.flush_async().map_err(Error::MapError)
+        self.map.flush_async()?;
+        Ok(())
     }
 }
 

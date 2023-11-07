@@ -20,7 +20,7 @@
 //! pre-defined values you can set (flags, id) but the value of `id`
 use bytesize::ByteSize;
 use memmap2::MmapMut;
-use std::{fs::OpenOptions, io, mem::size_of, ops::Range, os::fd::AsRawFd, path::Path};
+use std::{fs::OpenOptions, mem::size_of, ops::Range, os::fd::AsRawFd, path::Path};
 
 mod header;
 pub use header::{Flags, Header};

@@ -1,12 +1,12 @@
 use crate::{
     cache::{self, Cache, Sink},
-    map::{Block, BlockMut, Flags, Header},
+    map::{Block, Flags, Header},
     store::{self, Store},
 };
 use lazy_static::lazy_static;
 use prometheus::{register_int_counter, IntCounter};
+use std::io;
 use std::sync::Arc;
-use std::{io, ops::Deref};
 use tokio::sync::RwLock;
 
 lazy_static! {
@@ -51,8 +51,14 @@ impl<S> Sink for StoreSink<S>
 where
     S: Store,
 {
-    async fn evict(&mut self, _index: u32, _block: Block<'_>) -> cache::Result<()> {
+    async fn evict(&mut self, index: u32, block: Block<'_>) -> cache::Result<()> {
         BLOCKS_EVICTED.inc();
+
+        let mut store = self.store.write().await;
+        store
+            .set(index, block.data())
+            .await
+            .map_err(io::Error::from)?;
 
         Ok(())
     }
@@ -95,7 +101,7 @@ impl FlushRange {
 
         // otherwise create a new range and flush this one
         // and update self
-        let f = self.clone();
+        let f = *self;
         self.0 = location;
         self.1 = location + 1;
 
@@ -139,26 +145,26 @@ where
         u32::try_from(block).map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))
     }
 
-    async fn get_or_load(&mut self, index: u32) -> io::Result<BlockMut> {
-        let mut slot = self
-            .cache
-            .put(Header::new(index), None, &mut self.evict)
-            .await?;
+    // async fn get_or_load(&mut self, index: u32) -> io::Result<BlockMut> {
+    //     let mut slot = self
+    //         .cache
+    //         .put(Header::new(index), None, &mut self.evict)
+    //         .await?;
 
-        // this is done here not by passing data directly to put
-        // because evict might also try to hold the store lock
-        // which will cause a deadlock
-        // so instead we get the block as is from cache and fill it
-        // up
-        let store = self.store.read().await;
-        let data = store.get(index).await?;
-        if let Some(data) = data {
-            slot.data_mut().copy_from_slice(&data);
-            slot.update_crc()
-        }
+    //     // this is done here not by passing data directly to put
+    //     // because evict might also try to hold the store lock
+    //     // which will cause a deadlock
+    //     // so instead we get the block as is from cache and fill it
+    //     // up
+    //     let store = self.store.read().await;
+    //     let data = store.get(index).await?;
+    //     if let Some(data) = data {
+    //         slot.data_mut().copy_from_slice(&data);
+    //         slot.update_crc()
+    //     }
 
-        Ok(slot)
-    }
+    //     Ok(slot)
+    // }
 
     async fn inner_read(&mut self, offset: u64, mut buf: &mut [u8]) -> io::Result<()> {
         // find the block
@@ -167,7 +173,7 @@ where
         // TODO: make sure that index is not beyond the max index size by
         // the cold store.
 
-        let mut inner_offset = (offset as usize % self.cache.block_size());
+        let mut inner_offset = offset as usize % self.cache.block_size();
 
         loop {
             let block = self.cache.get(index);
@@ -213,7 +219,7 @@ where
     /// Write a block of data at offset.
     async fn inner_write(&mut self, offset: u64, mut buf: &[u8]) -> io::Result<()> {
         let mut index = self.block_of(offset)?;
-        let mut inner_offset = (offset as usize % self.cache.block_size());
+        let mut inner_offset = offset as usize % self.cache.block_size();
 
         loop {
             let block = self.cache.get_mut(index);
@@ -310,10 +316,10 @@ where
 pub struct NoStore;
 #[async_trait::async_trait]
 impl Store for NoStore {
-    async fn set(&mut self, index: u32, block: &[u8]) -> store::Result<()> {
+    async fn set(&mut self, _index: u32, _block: &[u8]) -> store::Result<()> {
         unimplemented!()
     }
-    async fn get(&self, index: u32) -> store::Result<Option<store::Data>> {
+    async fn get(&self, _index: u32) -> store::Result<Option<store::Data>> {
         unimplemented!()
     }
     fn size(&self) -> usize {

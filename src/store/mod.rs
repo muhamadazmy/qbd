@@ -38,7 +38,7 @@ impl<'a> Deref for Data<'a> {
     type Target = [u8];
     fn deref(&self) -> &Self::Target {
         match self {
-            Self::Owned(v) => &v,
+            Self::Owned(v) => v,
             Self::Borrowed(v) => v,
         }
     }
