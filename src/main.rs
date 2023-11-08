@@ -11,7 +11,7 @@ struct BSWrapper(ByteSize);
 
 impl FromStr for BSWrapper {
     type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         let size = ByteSize::from_str(s)?;
         Ok(Self(size))
     }

@@ -1,7 +1,8 @@
 use crate::{
-    cache::{self, Cache, Sink},
+    cache::{Cache, Sink},
     map::{Block, Flags, Header},
     store::{self, Store},
+    Result,
 };
 use lazy_static::lazy_static;
 use prometheus::{register_int_counter, IntCounter};
@@ -51,7 +52,7 @@ impl<S> Sink for StoreSink<S>
 where
     S: Store,
 {
-    async fn evict(&mut self, index: u32, block: Block<'_>) -> cache::Result<()> {
+    async fn evict(&mut self, index: u32, block: Block<'_>) -> Result<()> {
         if !block.header().flag(Flags::Dirty) {
             log::debug!("evict: {index} .. skipped");
             return Ok(());

@@ -6,46 +6,22 @@
 //! of blocks supported by the nbd device. If using block size of
 //! 1MiB this maps to 4096TiB
 //!
-use std::{io, num::NonZeroUsize, path::Path};
+use std::{num::NonZeroUsize, path::Path};
 
 use crate::map::{Block, BlockMut, Flags, Header};
 
-use super::map::{BlockMap, Error as MapError};
+use super::map::BlockMap;
 use bytesize::ByteSize;
 use lru::LruCache;
 
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error("invalid input block size expected")]
-    InvalidBlockSize,
+use crate::{Error, Result};
 
-    #[error("map error: {0}")]
-    MapError(#[from] MapError),
-
-    #[error("io error: {0}")]
-    IO(#[from] io::Error),
-}
-
-pub type Result<T> = std::result::Result<T, Error>;
 /// CachedBlock holds information about blocks in lru memory
 struct CachedBlock {
     /// location of the block in underlying cache
     location: usize,
     // in memory information
     // about the block can be here
-}
-
-impl From<Error> for std::io::Error {
-    fn from(value: Error) -> Self {
-        use std::io::{Error as IoError, ErrorKind};
-
-        // TODO: possible different error kind
-        match value {
-            Error::IO(err) => err,
-            Error::MapError(MapError::IO(err)) => err,
-            _ => IoError::new(ErrorKind::InvalidInput, value),
-        }
-    }
 }
 
 #[async_trait::async_trait]
@@ -65,7 +41,7 @@ impl Cache {
         let map = BlockMap::new(path, size, bs)?;
         let bc = size.as_u64() / bs.as_u64();
 
-        let mut cache = LruCache::new(NonZeroUsize::new(bc as usize).ok_or(MapError::ZeroSize)?);
+        let mut cache = LruCache::new(NonZeroUsize::new(bc as usize).ok_or(Error::ZeroSize)?);
 
         for block in map.iter() {
             let header = block.header();

@@ -23,41 +23,12 @@ use memmap2::MmapMut;
 use std::{fs::OpenOptions, mem::size_of, ops::Range, os::fd::AsRawFd, path::Path};
 
 mod header;
+use crate::{Error, Result};
 pub use header::{Flags, Header};
 
 pub const MAX_BLOCK_SIZE: ByteSize = ByteSize::mb(5);
 pub const CRC: crc::Crc<u64> = crc::Crc::<u64>::new(&crc::CRC_64_GO_ISO);
 const FS_NOCOW_FL: i64 = 0x00800000;
-use std::io::{Error as IoError, ErrorKind};
-
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error("size cannot be zero")]
-    ZeroSize,
-
-    #[error("block size is too big")]
-    BlockSizeTooBig,
-
-    // #[error("block count is too big")]
-    // BlockCountTooBig,
-    #[error("size must be multiple of block size")]
-    SizeNotMultipleOfBlockSize,
-
-    #[error("io error: {0}")]
-    IO(#[from] IoError),
-}
-
-impl From<Error> for std::io::Error {
-    fn from(value: Error) -> Self {
-        // TODO: possible different error kind
-        match value {
-            Error::IO(err) => err,
-            _ => IoError::new(ErrorKind::InvalidInput, value),
-        }
-    }
-}
-
-pub type Result<T> = std::result::Result<T, Error>;
 
 pub type Crc = u64;
 /// Block is a read-only block data from the cache
