@@ -171,9 +171,13 @@ where
         self.map.flush_async()?;
         Ok(())
     }
+
+    pub fn flush_range(&self, location: usize, count: usize) -> Result<()> {
+        self.map.flush_range(location, count)
+    }
 }
 
-struct NullStore;
+pub struct NullStore;
 
 #[async_trait::async_trait]
 impl Store for NullStore {

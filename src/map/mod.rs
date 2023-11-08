@@ -287,12 +287,6 @@ impl BlockMap {
         &mut self.crc_mut()[index]
     }
 
-    fn data_block_mut(&mut self, index: usize) -> &mut [u8] {
-        let data_offset = index * self.bs;
-        let range = data_offset..data_offset + self.bs;
-        &mut self.data_segment_mut()[range]
-    }
-
     /// iter over all blocks in cache
     pub fn iter(&self) -> impl Iterator<Item = Block> {
         CacheIter {
@@ -337,10 +331,10 @@ impl BlockMap {
 
     /// flush_block flushes a block and wait for it until it is written to disk
     pub fn flush_block(&self, location: usize) -> Result<()> {
-        self.flush_blocks(location, 1)
+        self.flush_range(location, 1)
     }
 
-    pub fn flush_blocks(&self, location: usize, count: usize) -> Result<()> {
+    pub fn flush_range(&self, location: usize, count: usize) -> Result<()> {
         let (mut start, _) = self.data_block_range(location);
         start += self.data_rng.start;
         let len = self.bs * count;

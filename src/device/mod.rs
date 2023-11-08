@@ -1,14 +1,7 @@
-use crate::{
-    cache::{Cache, Sink},
-    map::{Block, Flags, Header},
-    store::{self, Store},
-    Result,
-};
+use crate::{cache::Cache, map::Flags, store::Store};
 use lazy_static::lazy_static;
 use prometheus::{register_int_counter, IntCounter};
 use std::io;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 lazy_static! {
     static ref IO_READ_BYTES: IntCounter =
@@ -30,46 +23,6 @@ lazy_static! {
 }
 
 const FLUSH_LENGTH: usize = 4;
-
-struct StoreSink<S>
-where
-    S: Store,
-{
-    store: Arc<RwLock<S>>,
-}
-
-impl<S> StoreSink<S>
-where
-    S: Store,
-{
-    fn new(store: Arc<RwLock<S>>) -> Self {
-        Self { store }
-    }
-}
-
-#[async_trait::async_trait]
-impl<S> Sink for StoreSink<S>
-where
-    S: Store,
-{
-    async fn evict(&mut self, index: u32, block: Block<'_>) -> Result<()> {
-        if !block.header().flag(Flags::Dirty) {
-            log::debug!("evict: {index} .. skipped");
-            return Ok(());
-        }
-        log::debug!("evict: {index}");
-        BLOCKS_EVICTED.inc();
-
-        let mut store = self.store.write().await;
-        store
-            .set(index, block.data())
-            .await
-            .map_err(io::Error::from)?;
-
-        Ok(())
-    }
-}
-
 /// Flush range is a tuple of location and length
 /// of a range to be flushed
 /// [start, end[
@@ -123,23 +76,18 @@ pub struct Device<S>
 where
     S: Store,
 {
-    cache: Cache,
-    evict: StoreSink<S>,
+    cache: Cache<S>,
     flush: FlushRange,
-    store: Arc<RwLock<S>>,
 }
 
 impl<S> Device<S>
 where
     S: Store,
 {
-    pub fn new(cache: Cache, store: S) -> Self {
-        let store = Arc::new(RwLock::new(store));
+    pub fn new(cache: Cache<S>) -> Self {
         Self {
             cache,
-            evict: StoreSink::new(Arc::clone(&store)),
             flush: FlushRange::default(),
-            store,
         }
     }
 
@@ -151,27 +99,6 @@ where
         u32::try_from(block).map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))
     }
 
-    // async fn get_or_load(&mut self, index: u32) -> io::Result<BlockMut> {
-    //     let mut slot = self
-    //         .cache
-    //         .put(Header::new(index), None, &mut self.evict)
-    //         .await?;
-
-    //     // this is done here not by passing data directly to put
-    //     // because evict might also try to hold the store lock
-    //     // which will cause a deadlock
-    //     // so instead we get the block as is from cache and fill it
-    //     // up
-    //     let store = self.store.read().await;
-    //     let data = store.get(index).await?;
-    //     if let Some(data) = data {
-    //         slot.data_mut().copy_from_slice(&data);
-    //         slot.update_crc()
-    //     }
-
-    //     Ok(slot)
-    // }
-
     async fn inner_read(&mut self, offset: u64, mut buf: &mut [u8]) -> io::Result<()> {
         // find the block
 
@@ -182,33 +109,7 @@ where
         let mut inner_offset = offset as usize % self.cache.block_size();
 
         loop {
-            let block = self.cache.get(index);
-            // TODO: instead of initializing an empty block we should fetch from
-            // cold storage. this is temporary
-            let block = match block {
-                Some(block) => block,
-                None => {
-                    let mut slot = self
-                        .cache
-                        .put(Header::new(index), None, &mut self.evict)
-                        .await?;
-
-                    // this is done here not by passing data directly to put
-                    // because evict might also try to hold the store lock
-                    // which will cause a deadlock
-                    // so instead we get the block as is from cache and fill it
-                    // up
-                    let store = self.store.read().await;
-                    let data = store.get(index).await?;
-                    if let Some(data) = data {
-                        log::debug!("load: {index}");
-                        slot.data_mut().copy_from_slice(&data);
-                        slot.update_crc()
-                    }
-
-                    slot.into()
-                }
-            };
+            let block = self.cache.get(index).await?;
 
             let source = &block.data()[inner_offset..];
             let to_copy = std::cmp::min(source.len(), buf.len());
@@ -229,42 +130,15 @@ where
         let mut inner_offset = offset as usize % self.cache.block_size();
 
         loop {
-            let block = self.cache.get_mut(index);
-            // TODO: instead of initializing an empty block we should fetch from
-            // cold storage. this is temporary
-            let mut block = match block {
-                Some(block) => block,
-                None => {
-                    let mut slot = self
-                        .cache
-                        .put(Header::new(index), None, &mut self.evict)
-                        .await?;
-
-                    // this is done here not by passing data directly to put
-                    // because evict might also try to hold the store lock
-                    // which will cause a deadlock
-                    // so instead we get the block as is from cache and fill it
-                    // up
-                    let store = self.store.read().await;
-                    let data = store.get(index).await?;
-                    if let Some(data) = data {
-                        log::debug!("load: {index}");
-                        slot.data_mut().copy_from_slice(&data);
-                        slot.update_crc()
-                    }
-
-                    slot
-                }
-            };
-
+            let mut block = self.cache.get_mut(index).await?;
             let dest = &mut block.data_mut()[inner_offset..];
             let to_copy = std::cmp::min(dest.len(), buf.len());
             dest[..to_copy].copy_from_slice(&buf[..to_copy]);
 
-            block.set_header(block.header().set(Flags::Dirty, true));
+            block.header_mut().set(Flags::Dirty, true);
 
             if let Some(flush) = self.flush.append(block.location()) {
-                block.map().flush_blocks(flush.start(), flush.len())?;
+                self.cache.flush_range(flush.start(), flush.len())?;
             }
 
             buf = &buf[to_copy..];
@@ -321,24 +195,10 @@ where
     }
 }
 
-pub struct NoStore;
-#[async_trait::async_trait]
-impl Store for NoStore {
-    async fn set(&mut self, _index: u32, _block: &[u8]) -> store::Result<()> {
-        unimplemented!()
-    }
-    async fn get(&self, _index: u32) -> store::Result<Option<store::Data>> {
-        unimplemented!()
-    }
-    fn size(&self) -> usize {
-        unimplemented!()
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::cache::Cache;
+    use crate::cache::{Cache, NullStore};
     use bytesize::ByteSize;
     use nbd_async::BlockDevice;
 
@@ -348,9 +208,9 @@ mod test {
         // start from clean slate
         let _ = std::fs::remove_file(PATH);
 
-        let cache = Cache::new(PATH, ByteSize::kib(10), ByteSize::kib(1)).unwrap();
+        let cache = Cache::new(NullStore, PATH, ByteSize::kib(10), ByteSize::kib(1)).unwrap();
 
-        let mut dev = Device::new(cache, NoStore);
+        let mut dev = Device::new(cache);
 
         let mut buf: [u8; 512] = [1; 512];
 
@@ -380,9 +240,9 @@ mod test {
         // start from clean slate
         let _ = std::fs::remove_file(PATH);
 
-        let cache = Cache::new(PATH, ByteSize::kib(10), ByteSize::kib(1)).unwrap();
+        let cache = Cache::new(NullStore, PATH, ByteSize::kib(10), ByteSize::kib(1)).unwrap();
 
-        let mut dev = Device::new(cache, NoStore);
+        let mut dev = Device::new(cache);
 
         let mut buf: [u8; 512] = [1; 512];
 

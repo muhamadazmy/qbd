@@ -78,10 +78,10 @@ async fn main() -> anyhow::Result<()> {
 
     // let bs = 1*1024*1024; // 1mib
     // let cache_size = 1*1024*1024*1024; // 1gib
-    let cache = cache::Cache::new(args.cache, cache_size, block_size)?;
     let store = store::MapStore::new("/home/azmy/disk.full", disk_size, block_size)?;
+    let cache = cache::Cache::new(store, args.cache, cache_size, block_size)?;
 
-    let device = device::Device::new(cache, store);
+    let device = device::Device::new(cache);
 
     let registry = Arc::new(prometheus::default_registry().clone());
     tokio::spawn(prometheus_hyper::Server::run(

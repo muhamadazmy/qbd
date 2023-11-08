@@ -1,7 +1,7 @@
 use std::io::{Error as IoError, ErrorKind};
 
 pub mod cache;
-//pub mod device;
+pub mod device;
 pub mod map;
 pub mod store;
 
