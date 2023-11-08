@@ -189,13 +189,13 @@ impl BlockMap {
             }
         }
 
-        // use nix::fcntl::{fallocate, FallocateFlags};
-        // // we use fallocate to allocate entire map space on disk so we grantee write operations
-        // // won't fail
-        // fallocate(file.as_raw_fd(), FallocateFlags::empty(), 0, size as i64)
-        //     .map_err(|e| IoError::new(ErrorKind::Other, e))?;
+        use nix::fcntl::{fallocate, FallocateFlags};
+        // we use fallocate to allocate entire map space on disk so we grantee write operations
+        // won't fail
+        fallocate(file.as_raw_fd(), FallocateFlags::empty(), 0, size as i64)
+            .map_err(|e| IoError::new(ErrorKind::Other, e))?;
 
-        file.set_len(size as u64)?;
+        //file.set_len(size as u64)?;
         // we need then to open the underlying file and truncate it
         Ok(BlockMap {
             bc,
@@ -497,5 +497,35 @@ mod test {
         assert_eq!(1024 * 1024, block.data().len());
         // all data should equal to 'D' as set above
         assert!(block.data().iter().all(|b| *b == b'D'));
+    }
+
+    #[test]
+    fn test_big() {
+        const PATH: &str = "/tmp/map.big.test";
+        let mut cache = BlockMap::new(PATH, ByteSize::gib(1), ByteSize::mib(1)).unwrap();
+
+        let _d = Defer::new(|| {
+            std::fs::remove_file(PATH).unwrap();
+        });
+
+        assert_eq!(cache.block_count(), 1024);
+        // that's 1024 blocks given the cache params
+        for loc in 0..cache.block_count() {
+            let mut block = cache.at_mut(loc);
+
+            block.data_mut().fill_with(|| loc as u8);
+            block.header_mut().set(Flags::Dirty, true);
+        }
+
+        drop(cache);
+
+        let cache = BlockMap::new(PATH, ByteSize::gib(1), ByteSize::mib(1)).unwrap();
+        for loc in 0..cache.block_count() {
+            let block = cache.at(loc);
+
+            assert!(block.header().flag(Flags::Dirty));
+
+            block.data().iter().all(|v| *v == loc as u8);
+        }
     }
 }

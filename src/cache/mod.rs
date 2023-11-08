@@ -341,16 +341,19 @@ mod test {
         assert_eq!(block.location(), 0); // sanity check
                                          // we need this otherwise cache won't evict it
         block.header_mut().set(Flags::Dirty, true);
+        // fill it with something
+        block.data_mut().fill_with(|| 7);
+        block.update_crc();
 
         assert_eq!(cache.occupied(), 1);
 
         // cache can hold only 5 blocks. It already now holds 1 (block 9). If we get 5 more, block 9 should be evicted
-        cache.get(0).await.unwrap();
-        cache.get(1).await.unwrap();
-        cache.get(2).await.unwrap();
-        cache.get(3).await.unwrap();
-        cache.get(4).await.unwrap();
-        cache.get(5).await.unwrap();
+        assert_eq!(cache.get(0).await.unwrap().location(), 1);
+        assert_eq!(cache.get(1).await.unwrap().location(), 2);
+        assert_eq!(cache.get(2).await.unwrap().location(), 3);
+        assert_eq!(cache.get(3).await.unwrap().location(), 4);
+        assert_eq!(cache.get(4).await.unwrap().location(), 0);
+        assert_eq!(cache.get(5).await.unwrap().location(), 1);
 
         assert_eq!(cache.occupied(), 5);
 
@@ -362,5 +365,20 @@ mod test {
         assert_eq!(mem.mem.len(), 1);
 
         assert!(mem.mem.get(&9).is_some());
+
+        // open cache again with the same memory
+        let mut cache = Cache::new(mem, PATH, ByteSize::kib(5), ByteSize::kib(1)).unwrap();
+
+        let block = cache.get(9).await;
+        assert!(block.is_ok());
+        let block = block.unwrap();
+        // sanity check
+        assert_eq!(block.location(), 0);
+        // the block here was retrieved from map, so it shouldn't be dirty
+        assert!(!block.header().flag(Flags::Dirty));
+        assert!(block.data().iter().all(|v| *v == 7));
+        assert!(block.is_crc_ok());
+
+        assert_eq!(cache.occupied(), 5);
     }
 }
