@@ -345,7 +345,7 @@ impl BlockMap {
         start += self.data_rng.start;
         let len = self.bs * count;
         log::debug!("flushing block {location}/{count} [{start}: {len}]");
-        self.map.flush_async_range(start, len)?;
+        self.map.flush_range(start, len)?;
 
         // the header is also flushed but in async way
         self.map

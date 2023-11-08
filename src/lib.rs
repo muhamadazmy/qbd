@@ -24,6 +24,9 @@ pub enum Error {
     #[error("size must be multiple of block size")]
     SizeNotMultipleOfBlockSize,
 
+    #[error("sled db error: {0}")]
+    Sled(#[from] sled::Error),
+
     #[error("io error: {0}")]
     IO(#[from] IoError),
 }

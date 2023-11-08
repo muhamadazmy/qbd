@@ -170,6 +170,7 @@ where
                 Ok(())
             }
             Err(err) => {
+                log::error!("read error {err:#}");
                 IO_READ_ERR.inc();
                 Err(err)
             }
@@ -185,6 +186,7 @@ where
                 Ok(())
             }
             Err(err) => {
+                log::error!("write error {err:#}");
                 IO_WRITE_ERR.inc();
                 Err(err)
             }

@@ -24,6 +24,8 @@ impl FileStore {
 
 #[async_trait::async_trait]
 impl Store for FileStore {
+    type Vec = Vec<u8>;
+
     async fn set(&mut self, index: u32, data: &[u8]) -> Result<()> {
         if data.len() != self.map.block_size() {
             return Err(Error::InvalidBlockSize);
@@ -39,7 +41,7 @@ impl Store for FileStore {
         self.map.flush_block(index as usize)
     }
 
-    async fn get(&self, index: u32) -> Result<Option<Data>> {
+    async fn get(&self, index: u32) -> Result<Option<Data<Self::Vec>>> {
         // we access the map directly to avoid a borrow problem
         let header = self.map.header_at(index as usize);
         if !header.flag(Flags::Occupied) {

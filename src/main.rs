@@ -2,7 +2,7 @@ use anyhow::Context;
 use bytesize::ByteSize;
 use clap::{ArgAction, Parser};
 use qbd::{
-    store::{ConcatStore, FileStore, Store},
+    store::{ConcatStore, SledStore, Store},
     *,
 };
 use std::{fmt::Display, future, net::SocketAddr, path::PathBuf, str::FromStr, sync::Arc};
@@ -99,7 +99,7 @@ async fn main() -> anyhow::Result<()> {
         };
 
         stores.push(
-            FileStore::new(u.path(), size, block_size)
+            SledStore::new(u.path(), size, block_size)
                 .with_context(|| format!("failed to create store {u}"))?,
         );
     }

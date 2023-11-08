@@ -3,18 +3,28 @@ use std::io::Error as IoError;
 use std::ops::Deref;
 
 mod file;
+mod sled_store;
+
 use crate::{Error, Result};
 use bytesize::ByteSize;
 pub use file::FileStore;
+pub use sled_store::SledStore;
+
 /// Data is like built in Cow but read only
 /// this allow stores to return data with no copy
 /// if possible
-pub enum Data<'a> {
-    Owned(Vec<u8>),
+pub enum Data<'a, T>
+where
+    T: Deref<Target = [u8]>,
+{
+    Owned(T),
     Borrowed(&'a [u8]),
 }
 
-impl<'a> Deref for Data<'a> {
+impl<'a, T> Deref for Data<'a, T>
+where
+    T: Deref<Target = [u8]>,
+{
     type Target = [u8];
     fn deref(&self) -> &Self::Target {
         match self {
@@ -26,8 +36,10 @@ impl<'a> Deref for Data<'a> {
 
 #[async_trait::async_trait]
 pub trait Store: Send + Sync + 'static {
+    type Vec: Deref<Target = [u8]>;
+
     async fn set(&mut self, index: u32, block: &[u8]) -> Result<()>;
-    async fn get(&self, index: u32) -> Result<Option<Data>>;
+    async fn get(&self, index: u32) -> Result<Option<Data<Self::Vec>>>;
     fn size(&self) -> ByteSize;
     fn block_size(&self) -> usize;
 }
@@ -62,10 +74,12 @@ impl<S> Store for ConcatStore<S>
 where
     S: Store,
 {
+    type Vec = S::Vec;
+
     async fn set(&mut self, index: u32, block: &[u8]) -> Result<()> {
         let mut index = index as usize;
         for store in self.parts.iter_mut() {
-            let bc = store.size().0 as usize / store.block_size();
+            let bc = store.size().0 as usize / self.bs;
             if index < bc {
                 return store.set(index as u32, block).await;
             }
@@ -76,10 +90,10 @@ where
         Err(Error::BlockIndexOutOfRange)
     }
 
-    async fn get(&self, index: u32) -> Result<Option<Data>> {
+    async fn get(&self, index: u32) -> Result<Option<Data<Self::Vec>>> {
         let mut index = index as usize;
         for store in self.parts.iter() {
-            let bc = store.size().0 as usize / store.block_size();
+            let bc = store.size().0 as usize / self.bs;
             if index < bc {
                 return store.get(index as u32).await;
             }
@@ -123,12 +137,13 @@ mod test {
     }
     #[async_trait::async_trait]
     impl Store for InMemory {
+        type Vec = Vec<u8>;
         async fn set(&mut self, index: u32, block: &[u8]) -> Result<()> {
             self.mem.insert(index, Vec::from(block));
             Ok(())
         }
 
-        async fn get(&self, index: u32) -> Result<Option<Data>> {
+        async fn get(&self, index: u32) -> Result<Option<Data<Self::Vec>>> {
             Ok(self.mem.get(&index).map(|d| Data::Borrowed(&d)))
         }
 

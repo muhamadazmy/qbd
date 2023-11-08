@@ -17,7 +17,7 @@ use super::map::BlockMap;
 use bytesize::ByteSize;
 use lazy_static::lazy_static;
 use lru::LruCache;
-use prometheus::{register_int_counter, IntCounter};
+use prometheus::{register_int_counter, register_int_gauge, IntCounter, IntGauge};
 
 use crate::{Error, Result};
 
@@ -26,6 +26,8 @@ lazy_static! {
         register_int_counter!("blocks_evicted", "number of blocks evicted from backend").unwrap();
     static ref BLOCKS_LOADED: IntCounter =
         register_int_counter!("blocks_loaded", "number of blocks loaded from backend").unwrap();
+    static ref BLOCKS_CACHED: IntGauge =
+        register_int_gauge!("blocks_cached", "number of blocks available in cache").unwrap();
 
     // TODO add histograms for both read/write and evict operations
 }
@@ -74,6 +76,7 @@ where
             }
         }
 
+        BLOCKS_CACHED.set(cache.len() as i64);
         // to be able to check block boundaries
         let blocks = store.size().as_u64() / bs.as_u64();
         Ok(Self {
@@ -159,7 +162,7 @@ where
                 BLOCKS_EVICTED.inc();
                 self.store.set(*block_index, blk.data()).await?;
             } else {
-                log::debug!("block {} eviction skipped", *block_index);
+                log::trace!("block {} eviction skipped", *block_index);
             }
 
             // now the block location is ready to be reuse
@@ -190,6 +193,7 @@ where
             },
         );
 
+        BLOCKS_CACHED.set(self.cache.len() as i64);
         Ok(blk)
     }
 
@@ -207,10 +211,12 @@ pub struct NullStore;
 
 #[async_trait::async_trait]
 impl Store for NullStore {
+    type Vec = Vec<u8>;
+
     async fn set(&mut self, _index: u32, _block: &[u8]) -> Result<()> {
         Ok(())
     }
-    async fn get(&self, _index: u32) -> Result<Option<Data>> {
+    async fn get(&self, _index: u32) -> Result<Option<Data<Self::Vec>>> {
         Ok(None)
     }
     fn size(&self) -> ByteSize {
