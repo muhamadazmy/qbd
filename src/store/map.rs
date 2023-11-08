@@ -10,14 +10,14 @@ use super::*;
 
 pub struct MapStore {
     map: BlockMap,
-    size: usize,
+    size: ByteSize,
 }
 
 impl MapStore {
     pub fn new<P: AsRef<Path>>(path: P, size: ByteSize, bs: ByteSize) -> Result<Self> {
         Ok(Self {
             map: BlockMap::new(path, size, bs).map_err(IoError::from)?,
-            size: size.as_u64() as usize,
+            size,
         })
     }
 }
@@ -31,10 +31,12 @@ impl Store for MapStore {
 
         let mut block = self.map.at_mut(index as usize);
         block.data_mut().copy_from_slice(data);
-        block.set_header(block.header().with_flag(Flags::Occupied, true));
-        block.flush().map_err(IoError::from)?;
+        block.header_mut().set(Flags::Occupied, true);
 
-        Ok(())
+        // this flushes the block immediately, may
+        // be for performance improvements we shouldn't
+        // do that or use async way
+        self.map.flush_block(index as usize)
     }
 
     async fn get(&self, index: u32) -> Result<Option<Data>> {
@@ -49,7 +51,7 @@ impl Store for MapStore {
         Ok(Some(Data::Borrowed(data)))
     }
 
-    fn size(&self) -> usize {
+    fn size(&self) -> ByteSize {
         self.size
     }
 }

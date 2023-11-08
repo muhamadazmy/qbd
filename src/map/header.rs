@@ -27,19 +27,25 @@ impl Header {
         (self.0 & ID_MASK) as u32
     }
 
+    pub fn set_block(&mut self, id: u32) -> &mut Self {
+        self.0 = self.0 | (id as u64 & ID_MASK);
+        self
+    }
+
     /// gets if a flag is set on a header
     pub fn flag(&self, flag: Flags) -> bool {
         self.0 & flag as u64 > 0
     }
 
     /// sets or unsets a flag on a header
-    pub fn with_flag(self, flag: Flags, on: bool) -> Self {
+    pub fn set(&mut self, flag: Flags, on: bool) -> &mut Self {
         let v = match on {
             true => self.0 | flag as u64,
             false => self.0 & !(flag as u64),
         };
 
-        Self(v)
+        self.0 = v;
+        self
     }
 }
 
@@ -58,13 +64,15 @@ mod test {
         let header = Header::default();
         assert_eq!(false, header.flag(Flags::Dirty));
 
-        let header = Header::new(20).with_flag(Flags::Dirty, true);
+        let mut header = Header::new(20);
+        header.set(Flags::Dirty, true);
         assert_eq!(true, header.flag(Flags::Dirty));
         assert_eq!(20, header.block());
 
-        let header = header.with_flag(Flags::Occupied, true);
+        header.set_block(30);
+        header.set(Flags::Occupied, true);
         assert_eq!(true, header.flag(Flags::Dirty));
         assert_eq!(true, header.flag(Flags::Occupied));
-        assert_eq!(20, header.block());
+        assert_eq!(30, header.block());
     }
 }

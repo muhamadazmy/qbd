@@ -261,7 +261,7 @@ where
             let to_copy = std::cmp::min(dest.len(), buf.len());
             dest[..to_copy].copy_from_slice(&buf[..to_copy]);
 
-            block.set_header(block.header().with_flag(Flags::Dirty, true));
+            block.set_header(block.header().set(Flags::Dirty, true));
 
             if let Some(flush) = self.flush.append(block.location()) {
                 block.map().flush_blocks(flush.start(), flush.len())?;

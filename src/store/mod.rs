@@ -3,31 +3,9 @@ use std::io::Error as IoError;
 use std::ops::Deref;
 
 mod map;
+use crate::{Error, Result};
+use bytesize::ByteSize;
 pub use map::MapStore;
-
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error("invalid block size")]
-    InvalidBlockSize,
-
-    #[error("io error: {0}")]
-    IO(#[from] IoError),
-}
-
-impl From<Error> for std::io::Error {
-    fn from(value: Error) -> Self {
-        use std::io::ErrorKind;
-
-        // TODO: possible different error kind
-        match value {
-            Error::IO(err) => err,
-            _ => IoError::new(ErrorKind::InvalidInput, value),
-        }
-    }
-}
-
-pub type Result<T> = std::result::Result<T, Error>;
-
 /// Data is like built in Cow but read only
 /// this allow stores to return data with no copy
 /// if possible
@@ -50,5 +28,5 @@ impl<'a> Deref for Data<'a> {
 pub trait Store: Send + Sync + 'static {
     async fn set(&mut self, index: u32, block: &[u8]) -> Result<()>;
     async fn get(&self, index: u32) -> Result<Option<Data>>;
-    fn size(&self) -> usize;
+    fn size(&self) -> ByteSize;
 }

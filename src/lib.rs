@@ -1,7 +1,7 @@
 use std::io::{Error as IoError, ErrorKind};
 
 pub mod cache;
-pub mod device;
+//pub mod device;
 pub mod map;
 pub mod store;
 
@@ -15,6 +15,9 @@ pub enum Error {
 
     #[error("invalid block size")]
     InvalidBlockSize,
+
+    #[error("block index out of range")]
+    BlockIndexOutOfRange,
 
     // #[error("block count is too big")]
     // BlockCountTooBig,

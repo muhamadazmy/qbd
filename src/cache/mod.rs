@@ -8,7 +8,10 @@
 //!
 use std::{num::NonZeroUsize, path::Path};
 
-use crate::map::{Block, BlockMut, Flags, Header};
+use crate::{
+    map::{Block, BlockMut, Flags},
+    store::{Data, Store},
+};
 
 use super::map::BlockMap;
 use bytesize::ByteSize;
@@ -24,20 +27,25 @@ struct CachedBlock {
     // about the block can be here
 }
 
-#[async_trait::async_trait]
-pub trait Sink {
-    async fn evict(&mut self, index: u32, block: Block<'_>) -> Result<()>;
-}
-
 /// Cache layer on top of BlockMap. This allows tracking what block is in what map location
 /// and make it easier to find which block in the map is least used so we can evict if needed
-pub struct Cache {
+pub struct Cache<S>
+where
+    S: Store,
+{
     cache: LruCache<u32, CachedBlock>,
     map: BlockMap,
+    store: S,
+    // blocks is number of possible blocks
+    // in the store (store.size() / bs)
+    blocks: usize,
 }
 
-impl Cache {
-    pub fn new<P: AsRef<Path>>(path: P, size: ByteSize, bs: ByteSize) -> Result<Self> {
+impl<S> Cache<S>
+where
+    S: Store,
+{
+    pub fn new<P: AsRef<Path>>(store: S, path: P, size: ByteSize, bs: ByteSize) -> Result<Self> {
         let map = BlockMap::new(path, size, bs)?;
         let bc = size.as_u64() / bs.as_u64();
 
@@ -54,7 +62,15 @@ impl Cache {
                 );
             }
         }
-        Ok(Self { map, cache })
+
+        // to be able to check block boundaries
+        let blocks = store.size().as_u64() / bs.as_u64();
+        Ok(Self {
+            map,
+            cache,
+            store,
+            blocks: blocks as usize,
+        })
     }
 
     pub fn block_size(&self) -> usize {
@@ -71,81 +87,84 @@ impl Cache {
     /// requires no mut borrowing. But then multiple calls to get won't be possible
     /// because i will need exclusive access to this, which will slow down read
     /// access.
-    pub fn get(&mut self, block: u32) -> Option<Block> {
+    pub async fn get(&mut self, block: u32) -> Result<Block> {
         // we first hit the mem cache see if there is a block tracked here
-        let item = self.cache.get(&block)?;
-
-        Some(self.map.at(item.location))
+        if block as usize >= self.blocks {
+            return Err(Error::BlockIndexOutOfRange);
+        }
+        let item = self.cache.get(&block);
+        match item {
+            Some(cached) => Ok(self.map.at(cached.location)),
+            None => self.warm(block).await.map(Block::from),
+        }
     }
 
     /// get a BlockMut
-    pub fn get_mut(&mut self, block: u32) -> Option<BlockMut> {
-        let item = self.cache.get(&block)?;
+    pub async fn get_mut(&mut self, block: u32) -> Result<BlockMut> {
+        if block as usize >= self.blocks {
+            return Err(Error::BlockIndexOutOfRange);
+        }
 
-        Some(self.map.at_mut(item.location))
+        let item = self.cache.get(&block);
+        match item {
+            Some(cached) => Ok(self.map.at_mut(cached.location)),
+            None => self.warm(block).await,
+        }
     }
 
-    /// puts a block into cache, if the put operation requires eviction of a colder block, the cold
-    /// the evict function will be called with that evicted block.
-    /// If optional data is provided the data will be written as well to the new block.
-    ///
-    /// on success the BlockMut is returned
-    pub async fn put<E>(
-        &mut self,
-        header: Header,
-        data: Option<&[u8]>,
-        sink: &mut E,
-    ) -> Result<BlockMut>
-    where
-        E: Sink,
-    {
-        if let Some(data) = data {
-            if data.len() != self.map.block_size() {
-                return Err(Error::InvalidBlockSize);
-            }
-        }
-        // we need to find what slot. We then need to consult the cache which slot to use !
-        // right ? so either the cache is not full, then we can simply assume the next free slot
-        // is the empty one! otherwise peek into cache find out what is the least used block is
-        // get that out, and put that one in place!
-
-        // when using put we always mark this block as occupied
-        let header = header.with_flag(Flags::Occupied, true);
-
-        let mut block: BlockMut;
+    async fn warm(&mut self, block: u32) -> Result<BlockMut> {
+        // first find which block to evict.
+        let mut blk: BlockMut;
         if self.cache.len() < self.cache.cap().get() {
             // the map still has free slots then
-            block = self.map.at_mut(self.cache.len());
+            blk = self.map.at_mut(self.cache.len());
         } else {
             // other wise, we need to evict one of the blocks from the map file
             // so wee peek into lru find out which one we can kick out first.
 
             // we know that the cache is full, so this will always return Some
             let (block_index, item) = self.cache.peek_lru().unwrap();
-            // we need to get the block that will be evicted
-            let evicted = self.map.at(item.location);
+            // so block block_index stored at map location item.location
+            // can be evicted
+            blk = self.map.at_mut(item.location);
 
-            sink.evict(*block_index, evicted).await?;
+            // store this in permanent store
+            // eviction should only happen if blk is dirty
+            // note it's up to user of the cache to mark blocks as
+            // dirty otherwise they won't evict to backend
+            if blk.header().flag(Flags::Dirty) {
+                log::debug!("evicting dirty block {block}");
+                self.store.set(*block_index, blk.data()).await?;
+            }
 
-            // now set block
-            block = self.map.at_mut(item.location);
+            // now the block location is ready to be reuse
+            // note that the next call to push will actually remove that item from the lru
         }
 
+        blk.header_mut()
+            .set_block(block)
+            .set(Flags::Dirty, false)
+            .set(Flags::Occupied, true);
+
+        let data = self.store.get(block).await?;
         if let Some(data) = data {
-            block.data_mut().copy_from_slice(data);
-            block.update_crc();
+            // override block
+            log::debug!("warming cache for block {block}");
+            blk.data_mut().copy_from_slice(&data);
+            blk.update_crc();
+        } else {
+            // should we zero it out ?
+            // or not
         }
-
-        block.set_header(header);
 
         self.cache.push(
-            header.block(),
+            block,
             CachedBlock {
-                location: block.location(),
+                location: blk.location(),
             },
         );
 
-        Ok(block)
+        Ok(blk)
     }
 
     pub fn flush(&self) -> Result<()> {
@@ -154,12 +173,18 @@ impl Cache {
     }
 }
 
-pub struct EvictNoop;
+struct NullStore;
 
 #[async_trait::async_trait]
-impl Sink for EvictNoop {
-    async fn evict(&mut self, _: u32, _: Block<'_>) -> Result<()> {
+impl Store for NullStore {
+    async fn set(&mut self, _index: u32, _block: &[u8]) -> Result<()> {
         Ok(())
+    }
+    async fn get(&self, _index: u32) -> Result<Option<Data>> {
+        Ok(None)
+    }
+    fn size(&self) -> ByteSize {
+        ByteSize::b(u64::MAX)
     }
 }
 
@@ -174,25 +199,33 @@ mod test {
         // start from clean slate
         let _ = std::fs::remove_file(PATH);
 
-        let mut cache = Cache::new(PATH, ByteSize::kib(10), ByteSize::kib(1)).unwrap();
+        let mut cache = Cache::new(NullStore, PATH, ByteSize::kib(10), ByteSize::kib(1)).unwrap();
 
-        // one kilobytes of 10s
-        let data: [u8; 1024] = [10; 1024];
-
+        let block = cache.get_mut(20).await;
         //this block does not exist in the cache file yet.
-        assert!(cache.get(20).is_none());
+        // the NullStore is HUGE in size, so while the cache size is only 10kib
+        // blocks can be retrieved behind the cache size but as long as they
+        // are
+        assert!(block.is_ok());
 
-        let result = cache
-            .put(Header::new(20), Some(&data), &mut EvictNoop)
-            .await;
-        assert!(result.is_ok());
+        let mut block = block.unwrap();
+        assert!(!block.header().flag(Flags::Dirty));
+        assert!(block.header().flag(Flags::Occupied));
+        assert!(block.data().iter().all(|f| *f == 0));
+        assert_eq!(block.data().len(), 1024);
 
-        let block = cache.get(20);
-        assert!(block.is_some());
+        block.data_mut().fill(10);
+        block.header_mut().set(Flags::Dirty, true);
+
+        let block = cache.get(20).await;
+        assert!(block.is_ok());
 
         let block = block.unwrap();
-        assert!(block.is_crc_ok());
-        assert_eq!(block.data()[0], 10);
+
+        assert!(block.header().flag(Flags::Dirty));
+        assert!(block.header().flag(Flags::Occupied));
+        assert!(block.data().iter().all(|f| *f == 10));
+        assert_eq!(block.data().len(), 1024);
     }
 
     #[tokio::test]
@@ -201,29 +234,48 @@ mod test {
         // start from clean slate
         let _ = std::fs::remove_file(PATH);
 
-        let mut cache = Cache::new(PATH, ByteSize::kib(10), ByteSize::kib(1)).unwrap();
+        let mut cache = Cache::new(NullStore, PATH, ByteSize::kib(10), ByteSize::kib(1)).unwrap();
 
-        // one kilobytes of 10s
-        let data: [u8; 1024] = [10; 1024];
-
+        let block = cache.get_mut(20).await;
         //this block does not exist in the cache file yet.
-        assert!(cache.get(20).is_none());
+        // the NullStore is HUGE in size, so while the cache size is only 10kib
+        // blocks can be retrieved behind the cache size but as long as they
+        // are
+        assert!(block.is_ok());
 
-        let result = cache
-            .put(Header::new(20), Some(&data), &mut EvictNoop)
-            .await;
-        assert!(result.is_ok());
+        let mut block = block.unwrap();
+        assert!(!block.header().flag(Flags::Dirty));
+        assert!(block.header().flag(Flags::Occupied));
+        assert!(block.data().iter().all(|f| *f == 0));
+        assert_eq!(block.data().len(), 1024);
+
+        block.data_mut().fill(10);
+        block.header_mut().set(Flags::Dirty, true);
 
         // drop cache
         drop(cache);
 
-        let mut cache = Cache::new(PATH, ByteSize::kib(10), ByteSize::kib(1)).unwrap();
+        let mut cache = Cache::new(NullStore, PATH, ByteSize::kib(10), ByteSize::kib(1)).unwrap();
 
-        let block = cache.get(20);
-        assert!(block.is_some());
+        // block 0 was not here before just to make sure
+        let block = cache.get(0).await;
+        assert!(block.is_ok());
 
         let block = block.unwrap();
-        assert!(block.is_crc_ok());
-        assert_eq!(block.data()[0], 10);
+        assert!(!block.header().flag(Flags::Dirty));
+        assert!(block.header().flag(Flags::Occupied));
+        assert!(block.data().iter().all(|f| *f == 0));
+        assert_eq!(block.data().len(), 1024);
+
+        // this is from before the drop it should still be fine
+        let block = cache.get(20).await;
+        assert!(block.is_ok());
+
+        let block = block.unwrap();
+
+        assert!(block.header().flag(Flags::Dirty));
+        assert!(block.header().flag(Flags::Occupied));
+        assert!(block.data().iter().all(|f| *f == 10));
+        assert_eq!(block.data().len(), 1024);
     }
 }

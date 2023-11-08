@@ -33,8 +33,10 @@ const FS_NOCOW_FL: i64 = 0x00800000;
 pub type Crc = u64;
 /// Block is a read-only block data from the cache
 pub struct Block<'a> {
-    cache: &'a BlockMap,
     location: usize,
+    header: *const Header,
+    data: &'a [u8],
+    crc: Crc,
 }
 
 impl<'a> Block<'a> {
@@ -44,30 +46,32 @@ impl<'a> Block<'a> {
     }
 
     /// header associated with the block
-    pub fn header(&self) -> Header {
-        self.cache.header()[self.location]
+    pub fn header(&self) -> &Header {
+        unsafe { &*self.header }
     }
 
     /// verify if data and crc match
     pub fn is_crc_ok(&self) -> bool {
-        self.cache.crc()[self.location] == CRC.checksum(self.data())
+        self.crc == CRC.checksum(self.data())
     }
 
     /// returns crc stored on the block
     pub fn crc(&self) -> Crc {
-        self.cache.crc()[self.location]
+        self.crc
     }
 
     /// data bytes stored on block at location
     pub fn data(&self) -> &[u8] {
-        self.cache.data_at(self.location)
+        self.data
     }
 }
 
 /// BlockMut is a mut block
 pub struct BlockMut<'a> {
-    cache: &'a mut BlockMap,
     location: usize,
+    header: *mut Header,
+    data: &'a mut [u8],
+    crc: *mut Crc,
 }
 
 impl<'a> BlockMut<'a> {
@@ -77,54 +81,49 @@ impl<'a> BlockMut<'a> {
     }
 
     /// return header associated with block at location
-    pub fn header(&self) -> Header {
-        self.cache.header()[self.location]
+    pub fn header(&self) -> &Header {
+        unsafe { &*self.header }
     }
 
     /// sets header associated with block at location
-    pub fn set_header(&mut self, header: Header) {
-        self.cache.header_mut()[self.location] = header;
+    pub fn header_mut(&mut self) -> &mut Header {
+        unsafe { &mut *self.header }
     }
 
     /// verify if data and crc match
     pub fn is_crc_ok(&self) -> bool {
-        self.cache.crc()[self.location] == CRC.checksum(self.data())
+        unsafe { *self.crc == CRC.checksum(self.data()) }
     }
 
     /// returns crc stored on the block
     pub fn crc(&self) -> Crc {
-        self.cache.crc()[self.location]
+        unsafe { *self.crc }
     }
 
     /// updates crc to match the data
     pub fn update_crc(&mut self) {
-        self.cache.crc_mut()[self.location] = CRC.checksum(self.data())
+        unsafe {
+            *self.crc = CRC.checksum(self.data());
+        }
     }
 
     /// data stored on the block at location
     pub fn data(&self) -> &[u8] {
-        self.cache.data_at(self.location)
+        self.data
     }
 
     pub fn data_mut(&mut self) -> &mut [u8] {
-        self.cache.data_block_mut(self.location)
-    }
-
-    pub fn flush(&mut self) -> Result<()> {
-        self.cache.flush_block(self.location)
-    }
-
-    /// map returns the underlying BlockMap for that block
-    pub fn map(&mut self) -> &mut BlockMap {
-        self.cache
+        self.data
     }
 }
 
 impl<'a> From<BlockMut<'a>> for Block<'a> {
     fn from(value: BlockMut<'a>) -> Self {
         Self {
-            cache: value.cache,
             location: value.location,
+            data: value.data,
+            crc: value.crc(),
+            header: value.header,
         }
     }
 }
@@ -263,8 +262,29 @@ impl BlockMap {
     }
 
     #[inline]
-    pub(crate) fn header_at(&self, index: usize) -> Header {
-        self.header()[index]
+    pub(crate) fn data_mut_at(&mut self, index: usize) -> &mut [u8] {
+        let (start, end) = self.data_block_range(index);
+        &mut self.data_segment_mut()[start..end]
+    }
+
+    #[inline]
+    pub(crate) fn header_at(&self, index: usize) -> &Header {
+        &self.header()[index]
+    }
+
+    #[inline]
+    pub(crate) fn header_mut_at(&mut self, index: usize) -> &mut Header {
+        &mut self.header_mut()[index]
+    }
+
+    #[inline]
+    pub(crate) fn crc_at(&self, index: usize) -> Crc {
+        self.crc()[index]
+    }
+
+    #[inline]
+    pub(crate) fn crc_mut_at(&mut self, index: usize) -> &mut Crc {
+        &mut self.crc_mut()[index]
     }
 
     fn data_block_mut(&mut self, index: usize) -> &mut [u8] {
@@ -287,10 +307,14 @@ impl BlockMap {
             panic!("index out of range");
         }
 
-        //let data = &self.cache.data()[offset.. off]
+        let data = self.data_at(location);
+        let header: *const Header = self.header_at(location);
+        let crc = self.crc_at(location);
         Block {
-            cache: self,
             location,
+            header,
+            data,
+            crc,
         }
     }
 
@@ -300,9 +324,14 @@ impl BlockMap {
             panic!("index out of range");
         }
 
+        let header: *mut Header = self.header_mut_at(location);
+        let crc: *mut Crc = self.crc_mut_at(location);
+        let data = self.data_mut_at(location);
         BlockMut {
-            cache: self,
             location,
+            header,
+            data,
+            crc,
         }
     }
 
@@ -447,11 +476,11 @@ mod test {
 
         let mut block = cache.at_mut(0);
 
-        block.set_header(
-            Header::new(10)
-                .with_flag(header::Flags::Occupied, true)
-                .with_flag(header::Flags::Dirty, true),
-        );
+        block
+            .header_mut()
+            .set_block(10)
+            .set(header::Flags::Occupied, true)
+            .set(header::Flags::Dirty, true);
 
         block.data_mut().fill(b'D');
         block.update_crc();
