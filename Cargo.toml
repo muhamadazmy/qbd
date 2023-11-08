@@ -30,6 +30,7 @@ lazy_static = "1.4"
 prometheus-hyper = {version = "0.1", features = ["internal_metrics"] }
 ioctls = "0.6"
 url = "2.4"
+nix = {version = "0.27", features = ["fs"] }
 
 [build-dependencies]
 git-version = "0.3"

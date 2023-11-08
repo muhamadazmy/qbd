@@ -20,8 +20,8 @@
 //! pre-defined values you can set (flags, id) but the value of `id`
 use bytesize::ByteSize;
 use memmap2::MmapMut;
+use std::io::{Error as IoError, ErrorKind};
 use std::{fs::OpenOptions, mem::size_of, ops::Range, os::fd::AsRawFd, path::Path};
-
 mod header;
 use crate::{Error, Result};
 pub use header::{Flags, Header};
@@ -188,6 +188,12 @@ impl BlockMap {
                 log::error!("failed to disable COW: {v}");
             }
         }
+
+        // use nix::fcntl::{fallocate, FallocateFlags};
+        // // we use fallocate to allocate entire map space on disk so we grantee write operations
+        // // won't fail
+        // fallocate(file.as_raw_fd(), FallocateFlags::empty(), 0, size as i64)
+        //     .map_err(|e| IoError::new(ErrorKind::Other, e))?;
 
         file.set_len(size as u64)?;
         // we need then to open the underlying file and truncate it

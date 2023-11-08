@@ -568,7 +568,7 @@ dependencies = [
  "async-trait",
  "byteorder",
  "futures-util",
- "nix",
+ "nix 0.24.3",
  "tokio",
 ]
 
@@ -582,6 +582,17 @@ dependencies = [
  "cfg-if",
  "libc",
  "memoffset",
+]
+
+[[package]]
+name = "nix"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2eb04e9c688eff1c89d72b407f168cf79bb9e867a9d3323ed6c01519eb9cc053"
+dependencies = [
+ "bitflags 2.4.1",
+ "cfg-if",
+ "libc",
 ]
 
 [[package]]
@@ -729,6 +740,7 @@ dependencies = [
  "lru",
  "memmap2",
  "nbd-async",
+ "nix 0.27.1",
  "prometheus",
  "prometheus-hyper",
  "simple_logger",

@@ -137,6 +137,7 @@ where
             let to_copy = std::cmp::min(dest.len(), buf.len());
             dest[..to_copy].copy_from_slice(&buf[..to_copy]);
 
+            // mark it dirty because it was modified
             block.header_mut().set(Flags::Dirty, true);
 
             if let Some(flush) = self.flush.append(block.location()) {

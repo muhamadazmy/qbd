@@ -84,6 +84,10 @@ where
         })
     }
 
+    pub fn inner(self) -> S {
+        self.store
+    }
+
     pub fn block_size(&self) -> usize {
         self.map.block_size()
     }
@@ -92,6 +96,12 @@ where
         self.map.block_count()
     }
 
+    pub fn occupied(&self) -> usize {
+        self.map
+            .iter()
+            .filter(|b| b.header().flag(Flags::Occupied))
+            .count()
+    }
     /// gets the block with id <block> if already in cache, other wise return None
     /// TODO: enhance access to this method. the `mut` is only needed to allow
     /// the lru cache to update, but the block itself doesn't need it because it
@@ -125,6 +135,7 @@ where
 
     async fn warm(&mut self, block: u32) -> Result<BlockMut> {
         // first find which block to evict.
+
         let mut blk: BlockMut;
         if self.cache.len() < self.cache.cap().get() {
             // the map still has free slots then
@@ -144,9 +155,11 @@ where
             // note it's up to user of the cache to mark blocks as
             // dirty otherwise they won't evict to backend
             if blk.header().flag(Flags::Dirty) {
-                log::debug!("evicting dirty block {block}");
+                log::debug!("block {} eviction", *block_index);
                 BLOCKS_EVICTED.inc();
                 self.store.set(*block_index, blk.data()).await?;
+            } else {
+                log::debug!("block {} eviction skipped", *block_index);
             }
 
             // now the block location is ready to be reuse
@@ -211,6 +224,8 @@ impl Store for NullStore {
 
 #[cfg(test)]
 mod test {
+
+    use std::collections::HashMap;
 
     use super::*;
 
@@ -298,5 +313,82 @@ mod test {
         assert!(block.header().flag(Flags::Occupied));
         assert!(block.data().iter().all(|f| *f == 10));
         assert_eq!(block.data().len(), 1024);
+    }
+
+    struct InMemory {
+        mem: HashMap<u32, Vec<u8>>,
+        cap: usize,
+    }
+
+    impl InMemory {
+        fn new(cap: usize) -> Self {
+            Self {
+                mem: HashMap::with_capacity(cap),
+                cap,
+            }
+        }
+    }
+    #[async_trait::async_trait]
+    impl Store for InMemory {
+        async fn set(&mut self, index: u32, block: &[u8]) -> Result<()> {
+            self.mem.insert(index, Vec::from(block));
+            Ok(())
+        }
+
+        async fn get(&self, index: u32) -> Result<Option<Data>> {
+            Ok(self.mem.get(&index).map(|d| Data::Borrowed(&d)))
+        }
+
+        fn size(&self) -> ByteSize {
+            ByteSize((self.cap * self.block_size()) as u64)
+        }
+
+        fn block_size(&self) -> usize {
+            1024
+        }
+    }
+
+    #[tokio::test]
+    async fn test_eviction() {
+        const PATH: &str = "/tmp/cache.reload.test";
+        // start from clean slate
+        let _ = std::fs::remove_file(PATH);
+
+        // store of 10k
+        let mem = InMemory::new(10);
+
+        assert_eq!(mem.size(), ByteSize::kib(10));
+        // cache of 5k and bs of 1k
+        let mut cache = Cache::new(mem, PATH, ByteSize::kib(5), ByteSize::kib(1)).unwrap();
+
+        assert_eq!(cache.block_count(), 5);
+
+        let block = cache.get_mut(9).await;
+        assert!(block.is_ok());
+        let mut block = block.unwrap();
+        assert_eq!(block.location(), 0); // sanity check
+                                         // we need this otherwise cache won't evict it
+        block.header_mut().set(Flags::Dirty, true);
+
+        assert_eq!(cache.occupied(), 1);
+
+        // cache can hold only 5 blocks. It already now holds 1 (block 9). If we get 5 more, block 9 should be evicted
+        cache.get(0).await.unwrap();
+        cache.get(1).await.unwrap();
+        cache.get(2).await.unwrap();
+        cache.get(3).await.unwrap();
+        cache.get(4).await.unwrap();
+        cache.get(5).await.unwrap();
+
+        assert_eq!(cache.occupied(), 5);
+
+        let mem = cache.inner();
+
+        // while we should except 2 blocks more evicted because we
+        // have pushed total of 7 blocks, but only block 9 was dirty
+        // hence block 0 (the last to be evicted) is in fact not dirty
+        assert_eq!(mem.mem.len(), 1);
+
+        assert!(mem.mem.get(&9).is_some());
     }
 }
