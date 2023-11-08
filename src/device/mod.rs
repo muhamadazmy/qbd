@@ -52,6 +52,11 @@ where
     S: Store,
 {
     async fn evict(&mut self, index: u32, block: Block<'_>) -> cache::Result<()> {
+        if !block.header().flag(Flags::Dirty) {
+            log::debug!("evict: {index} .. skipped");
+            return Ok(());
+        }
+        log::debug!("evict: {index}");
         BLOCKS_EVICTED.inc();
 
         let mut store = self.store.write().await;
@@ -195,6 +200,7 @@ where
                     let store = self.store.read().await;
                     let data = store.get(index).await?;
                     if let Some(data) = data {
+                        log::debug!("load: {index}");
                         slot.data_mut().copy_from_slice(&data);
                         slot.update_crc()
                     }
@@ -241,6 +247,7 @@ where
                     let store = self.store.read().await;
                     let data = store.get(index).await?;
                     if let Some(data) = data {
+                        log::debug!("load: {index}");
                         slot.data_mut().copy_from_slice(&data);
                         slot.update_crc()
                     }

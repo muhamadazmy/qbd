@@ -64,16 +64,24 @@ async fn main() -> anyhow::Result<()> {
         })
         .init()?;
 
-    let cache_size = args.cache_size.0;
-    let block_size = args.block_size.0;
+    // let cache_size = args.cache_size.0;
+    // let block_size = args.block_size.0;
+
+    let cache_size = ByteSize::gib(1);
+    let block_size = ByteSize::mib(1);
+
+    let disk_size = ByteSize::gib(10);
 
     if cache_size.as_u64() % block_size.as_u64() != 0 {
         anyhow::bail!("cache-size must be multiple of block-size");
     }
 
+    // let bs = 1*1024*1024; // 1mib
+    // let cache_size = 1*1024*1024*1024; // 1gib
     let cache = cache::Cache::new(args.cache, cache_size, block_size)?;
+    let store = store::MapStore::new("/home/azmy/disk.full", disk_size, block_size)?;
 
-    let device = device::Device::new(cache, device::NoStore);
+    let device = device::Device::new(cache, store);
 
     let registry = Arc::new(prometheus::default_registry().clone());
     tokio::spawn(prometheus_hyper::Server::run(
@@ -82,7 +90,7 @@ async fn main() -> anyhow::Result<()> {
         future::pending(),
     ));
 
-    nbd_async::serve_local_nbd(args.nbd, 1024, cache_size.as_u64() / 1024, false, device).await?;
+    nbd_async::serve_local_nbd(args.nbd, 1024, disk_size.as_u64() / 1024, false, device).await?;
 
     Ok(())
 }

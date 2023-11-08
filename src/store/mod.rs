@@ -1,7 +1,9 @@
 //use std::io::Error;
 use std::io::Error as IoError;
 use std::ops::Deref;
+
 mod map;
+pub use map::MapStore;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
