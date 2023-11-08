@@ -224,9 +224,6 @@ impl Store for NullStore {
 
 #[cfg(test)]
 mod test {
-
-    use std::collections::HashMap;
-
     use crate::store;
 
     use super::*;

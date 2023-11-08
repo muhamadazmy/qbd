@@ -28,7 +28,7 @@ impl Header {
     }
 
     pub fn set_block(&mut self, id: u32) -> &mut Self {
-        self.0 = self.0 | (id as u64 & ID_MASK);
+        self.0 |= id as u64 & ID_MASK;
         self
     }
 

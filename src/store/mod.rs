@@ -101,6 +101,7 @@ where
 
 #[cfg(test)]
 pub use test::InMemory;
+
 #[cfg(test)]
 mod test {
 
