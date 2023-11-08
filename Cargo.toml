@@ -27,8 +27,9 @@ simple_logger = "1.0"
 anyhow = "1.0"
 prometheus = "0.13"
 lazy_static = "1.4"
-prometheus-hyper = "0.1"
+prometheus-hyper = {version = "0.1", features = ["internal_metrics"] }
 ioctls = "0.6"
+url = "2.4"
 
 [build-dependencies]
 git-version = "0.3"

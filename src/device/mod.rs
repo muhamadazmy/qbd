@@ -7,17 +7,19 @@ lazy_static! {
     static ref IO_READ_BYTES: IntCounter =
         register_int_counter!("io_read_bytes", "number of bytes read").unwrap();
     static ref IO_WRITE_BYTES: IntCounter =
-        register_int_counter!("io_wite_bytes", "number of bytes written").unwrap();
+        register_int_counter!("io_write_bytes", "number of bytes written").unwrap();
     static ref IO_READ_OP: IntCounter =
         register_int_counter!("io_read_op", "number of read io operations").unwrap();
     static ref IO_READ_ERR: IntCounter =
         register_int_counter!("io_read_err", "number of read errors").unwrap();
     static ref IO_WRITE_OP: IntCounter =
-        register_int_counter!("io_wite_op", "number of write io operations").unwrap();
+        register_int_counter!("io_write_op", "number of write io operations").unwrap();
     static ref IO_WRITE_ERR: IntCounter =
-        register_int_counter!("io_wite_err", "number of write errors").unwrap();
+        register_int_counter!("io_write_err", "number of write errors").unwrap();
     static ref BLOCKS_EVICTED: IntCounter =
         register_int_counter!("blocks_evicted", "number of blocks evicted").unwrap();
+    static ref DEVICE_FLUSH: IntCounter =
+        register_int_counter!("device_flush", "number of flush requests").unwrap();
 
     // TODO add histograms for both read/write and evict operations
 }
@@ -190,6 +192,7 @@ where
 
     /// Flushes write buffers to the underlying storage medium
     async fn flush(&mut self) -> io::Result<()> {
+        DEVICE_FLUSH.inc();
         self.cache.flush()?;
         Ok(())
     }

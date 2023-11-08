@@ -1,8 +1,11 @@
+use anyhow::Context;
 use bytesize::ByteSize;
 use clap::{ArgAction, Parser};
-use qbd::*;
+use qbd::{
+    store::{ConcatStore, FileStore, Store},
+    *,
+};
 use std::{fmt::Display, future, net::SocketAddr, path::PathBuf, str::FromStr, sync::Arc};
-
 /// This wrapper is only to overcome the default
 /// stupid format of ByteSize which uses MB/GB units instead
 /// of MiB/GiB units
@@ -35,13 +38,22 @@ struct Args {
     #[arg(short, long)]
     cache: PathBuf,
 
-    // TODO display of
     /// cache size has to be multiple of block-size
     #[arg(long, default_value_t=BSWrapper(bytesize::ByteSize::gib(10)))]
     cache_size: BSWrapper,
 
     #[arg(long, default_value_t=BSWrapper(bytesize::ByteSize::mib(1)))]
     block_size: BSWrapper,
+
+    /// url to backend store as `file:///path/to/file?size=SIZE`
+    /// accepts multiple stores, the total size of the disk
+    /// is the total size of all stores provided
+    #[arg(long, required = true)]
+    store: Vec<url::Url>,
+
+    /// listen address for metrics. metrics will be available at /metrics
+    #[arg(short, long, default_value_t = SocketAddr::from(([127, 0, 0, 1], 9000)))]
+    metrics: SocketAddr,
 
     /// enable debugging logs
     #[clap(long, action=ArgAction::Count)]
@@ -64,21 +76,44 @@ async fn main() -> anyhow::Result<()> {
         })
         .init()?;
 
-    // let cache_size = args.cache_size.0;
-    // let block_size = args.block_size.0;
-
-    let cache_size = ByteSize::gib(1);
-    let block_size = ByteSize::mib(1);
-
-    let disk_size = ByteSize::gib(10);
+    let cache_size = args.cache_size.0;
+    let block_size = args.block_size.0;
 
     if cache_size.as_u64() % block_size.as_u64() != 0 {
         anyhow::bail!("cache-size must be multiple of block-size");
     }
 
-    // let bs = 1*1024*1024; // 1mib
-    // let cache_size = 1*1024*1024*1024; // 1gib
-    let store = store::MapStore::new("/home/azmy/disk.full", disk_size, block_size)?;
+    // todo: probably move building of a store from url
+    // somewhere else
+    let mut stores = vec![];
+    for u in &args.store {
+        if u.scheme() != "file" {
+            anyhow::bail!("only store type `file` is supported");
+        }
+
+        let size = u.query_pairs().find(|(key, _)| key == "size");
+        let size = match size {
+            Some((_, size)) => ByteSize::from_str(&size)
+                .map_err(|e| anyhow::anyhow!("failed to parse store size: {e}"))?,
+            None => anyhow::bail!("size param is required in store url"),
+        };
+
+        stores.push(
+            FileStore::new(u.path(), size, block_size)
+                .with_context(|| format!("failed to create store {u}"))?,
+        );
+    }
+
+    let store = ConcatStore::new(stores)?;
+
+    let disk_size = store.size();
+    log::info!(
+        "size: {} cache-size: {}, block-size: {}",
+        disk_size.to_string_as(true),
+        cache_size.to_string_as(true),
+        block_size.to_string_as(true)
+    );
+
     let cache = cache::Cache::new(store, args.cache, cache_size, block_size)?;
 
     let device = device::Device::new(cache);
@@ -86,7 +121,7 @@ async fn main() -> anyhow::Result<()> {
     let registry = Arc::new(prometheus::default_registry().clone());
     tokio::spawn(prometheus_hyper::Server::run(
         registry,
-        SocketAddr::from(([127, 0, 0, 1], 9000)),
+        args.metrics,
         future::pending(),
     ));
 

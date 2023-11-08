@@ -15,9 +15,20 @@ use crate::{
 
 use super::map::BlockMap;
 use bytesize::ByteSize;
+use lazy_static::lazy_static;
 use lru::LruCache;
+use prometheus::{register_int_counter, IntCounter};
 
 use crate::{Error, Result};
+
+lazy_static! {
+    static ref BLOCKS_EVICTED: IntCounter =
+        register_int_counter!("blocks_evicted", "number of blocks evicted from backend").unwrap();
+    static ref BLOCKS_LOADED: IntCounter =
+        register_int_counter!("blocks_loaded", "number of blocks loaded from backend").unwrap();
+
+    // TODO add histograms for both read/write and evict operations
+}
 
 /// CachedBlock holds information about blocks in lru memory
 struct CachedBlock {
@@ -134,6 +145,7 @@ where
             // dirty otherwise they won't evict to backend
             if blk.header().flag(Flags::Dirty) {
                 log::debug!("evicting dirty block {block}");
+                BLOCKS_EVICTED.inc();
                 self.store.set(*block_index, blk.data()).await?;
             }
 
@@ -149,6 +161,7 @@ where
         let data = self.store.get(block).await?;
         if let Some(data) = data {
             // override block
+            BLOCKS_LOADED.inc();
             log::debug!("warming cache for block {block}");
             blk.data_mut().copy_from_slice(&data);
             blk.update_crc();
@@ -189,6 +202,10 @@ impl Store for NullStore {
     }
     fn size(&self) -> ByteSize {
         ByteSize::b(u64::MAX)
+    }
+
+    fn block_size(&self) -> usize {
+        0
     }
 }
 
