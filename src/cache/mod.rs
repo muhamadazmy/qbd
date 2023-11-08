@@ -227,6 +227,8 @@ mod test {
 
     use std::collections::HashMap;
 
+    use crate::store;
+
     use super::*;
 
     #[tokio::test]
@@ -315,39 +317,6 @@ mod test {
         assert_eq!(block.data().len(), 1024);
     }
 
-    struct InMemory {
-        mem: HashMap<u32, Vec<u8>>,
-        cap: usize,
-    }
-
-    impl InMemory {
-        fn new(cap: usize) -> Self {
-            Self {
-                mem: HashMap::with_capacity(cap),
-                cap,
-            }
-        }
-    }
-    #[async_trait::async_trait]
-    impl Store for InMemory {
-        async fn set(&mut self, index: u32, block: &[u8]) -> Result<()> {
-            self.mem.insert(index, Vec::from(block));
-            Ok(())
-        }
-
-        async fn get(&self, index: u32) -> Result<Option<Data>> {
-            Ok(self.mem.get(&index).map(|d| Data::Borrowed(&d)))
-        }
-
-        fn size(&self) -> ByteSize {
-            ByteSize((self.cap * self.block_size()) as u64)
-        }
-
-        fn block_size(&self) -> usize {
-            1024
-        }
-    }
-
     #[tokio::test]
     async fn test_eviction() {
         const PATH: &str = "/tmp/cache.reload.test";
@@ -355,7 +324,7 @@ mod test {
         let _ = std::fs::remove_file(PATH);
 
         // store of 10k
-        let mem = InMemory::new(10);
+        let mem = store::InMemory::new(10);
 
         assert_eq!(mem.size(), ByteSize::kib(10));
         // cache of 5k and bs of 1k

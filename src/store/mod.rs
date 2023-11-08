@@ -98,3 +98,76 @@ where
         self.bs
     }
 }
+
+#[cfg(test)]
+pub use test::InMemory;
+#[cfg(test)]
+mod test {
+
+    use super::*;
+    use std::collections::HashMap;
+
+    pub struct InMemory {
+        pub mem: HashMap<u32, Vec<u8>>,
+        cap: usize,
+    }
+
+    impl InMemory {
+        pub fn new(cap: usize) -> Self {
+            Self {
+                mem: HashMap::with_capacity(cap),
+                cap,
+            }
+        }
+    }
+    #[async_trait::async_trait]
+    impl Store for InMemory {
+        async fn set(&mut self, index: u32, block: &[u8]) -> Result<()> {
+            self.mem.insert(index, Vec::from(block));
+            Ok(())
+        }
+
+        async fn get(&self, index: u32) -> Result<Option<Data>> {
+            Ok(self.mem.get(&index).map(|d| Data::Borrowed(&d)))
+        }
+
+        fn size(&self) -> ByteSize {
+            ByteSize((self.cap * self.block_size()) as u64)
+        }
+
+        fn block_size(&self) -> usize {
+            1024
+        }
+    }
+
+    #[tokio::test]
+    async fn test_concat() {
+        let mut store = ConcatStore::new(vec![InMemory::new(10), InMemory::new(10)]).unwrap();
+        assert_eq!(store.block_size(), 1024);
+        assert_eq!(store.size(), ByteSize(20 * 1024)); // 20 blocks each of 1024 bytes
+
+        let b0 = store.get(0).await.unwrap();
+        let b10 = store.get(10).await.unwrap();
+        let b19 = store.get(19).await.unwrap();
+
+        assert!(store.get(20).await.is_err());
+
+        assert!(b0.is_none());
+        assert!(b10.is_none());
+        assert!(b19.is_none());
+
+        let data: [u8; 1024] = [70; 1024];
+        assert!(store.set(10, &data).await.is_ok());
+
+        let b10 = store.get(10).await.unwrap();
+        assert!(b10.is_some());
+        let b10 = b10.unwrap();
+        b10.iter().all(|f| *f == 70);
+
+        let mem = &store.parts[1].mem;
+        assert_eq!(mem.len(), 1);
+        // because the concat store recalculate the offsets
+        // this then should be at index 0
+        assert!(mem.get(&0).is_some());
+    }
+}
