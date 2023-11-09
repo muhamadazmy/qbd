@@ -6,8 +6,7 @@ use crate::map::{BlockMap, Flags};
 
 use super::*;
 
-/// MapStore implements a store on a mmap file.
-
+/// persisted storage using BlockMap
 pub struct FileStore {
     map: BlockMap,
     size: ByteSize,

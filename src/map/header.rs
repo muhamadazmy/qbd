@@ -3,6 +3,7 @@ pub struct Header(u64);
 
 const ID_MASK: u64 = 0x00000000ffffffff;
 
+/// Possible header flags
 #[repr(u64)]
 pub enum Flags {
     // The occupied flag means this block actually contains data
@@ -27,6 +28,7 @@ impl Header {
         (self.0 & ID_MASK) as u32
     }
 
+    /// set block id stored in that header
     pub fn set_block(&mut self, id: u32) -> &mut Self {
         self.0 = (self.0 & !ID_MASK) | (id as u64 & ID_MASK);
         self

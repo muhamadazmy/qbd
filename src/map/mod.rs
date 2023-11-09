@@ -1,14 +1,14 @@
 //! Block map
 //! This is a map implementation that stores blocks on a persisted file.
 //! A map is created over a file, the file is truncated to the needed size
-//! to support provided block count (bc) and block size (bs)
+//! to support provided (size) and block size (bs)
 //!
 //! a block is associated with a header that container information about the block
 //! (id, flags, and crc)
 //!
 //! it's up to the user of this map to make sense of the stored values
 //!
-//! This works by mapping a file to a memmap. The file is then split into 3 segments
+//! This works by mapping a file to memory with  mmap. The file is then split into 3 segments
 //! as follows where N is number of blocks
 //!  - Headers section, size = N * size(u64),
 //!    please check header docs

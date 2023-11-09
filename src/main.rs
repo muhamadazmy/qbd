@@ -34,7 +34,7 @@ struct Args {
     #[arg(short, long)]
     nbd: PathBuf,
 
-    /// path to the cache file, usually should be SSD storage
+    /// path to the cache file, usually should reside on SSD storage
     #[arg(short, long)]
     cache: PathBuf,
 
@@ -42,6 +42,7 @@ struct Args {
     #[arg(long, default_value_t=BSWrapper(bytesize::ByteSize::gib(10)))]
     cache_size: BSWrapper,
 
+    /// block size used for both cache and storage
     #[arg(long, default_value_t=BSWrapper(bytesize::ByteSize::mib(1)))]
     block_size: BSWrapper,
 
@@ -60,22 +61,7 @@ struct Args {
     debug: u8,
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    // create a 10MB block device
-    let args = Args::parse();
-
-    simple_logger::SimpleLogger::new()
-        .with_utc_timestamps()
-        .with_level({
-            match args.debug {
-                0 => log::LevelFilter::Info,
-                1 => log::LevelFilter::Debug,
-                _ => log::LevelFilter::Trace,
-            }
-        })
-        .init()?;
-
+async fn app(args: Args) -> anyhow::Result<()> {
     let cache_size = args.cache_size.0;
     let block_size = args.block_size.0;
 
@@ -134,6 +120,30 @@ async fn main() -> anyhow::Result<()> {
         device,
     )
     .await?;
+
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    // create a 10MB block device
+    let args = Args::parse();
+
+    simple_logger::SimpleLogger::new()
+        .with_utc_timestamps()
+        .with_level({
+            match args.debug {
+                0 => log::LevelFilter::Info,
+                1 => log::LevelFilter::Debug,
+                _ => log::LevelFilter::Trace,
+            }
+        })
+        .init()?;
+
+    if let Err(err) = app(args).await {
+        eprintln!("{:#}", err);
+        std::process::exit(1);
+    }
 
     Ok(())
 }

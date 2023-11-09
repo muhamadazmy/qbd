@@ -74,6 +74,10 @@ impl FlushRange {
     }
 }
 
+/// implementation of the nbd device
+///
+/// The device mainly works against a cache object
+/// which works as a layer on top of persisted storage
 pub struct Device<S>
 where
     S: Store,

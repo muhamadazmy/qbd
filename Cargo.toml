@@ -2,6 +2,7 @@
 name = "qbd"
 version = "0.1.0"
 edition = "2021"
+description = "block device in user space"
 
 [lib]
 path="src/lib.rs"
