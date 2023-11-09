@@ -48,7 +48,7 @@ impl Store for SledStore {
         if index >= self.bc {
             return Err(Error::BlockIndexOutOfRange);
         }
-        let data = self.db.get(index.to_ne_bytes())?.map(|d| Data::Owned(d));
+        let data = self.db.get(index.to_ne_bytes())?.map(Data::Owned);
 
         Ok(data)
     }

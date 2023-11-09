@@ -35,3 +35,7 @@ sled = {version = "0.34", features = ["io_uring"] }
 
 [build-dependencies]
 git-version = "0.3"
+
+[profile.release]
+lto = true
+codegen-units = 1

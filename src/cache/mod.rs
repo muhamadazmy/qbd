@@ -9,7 +9,7 @@
 use std::{num::NonZeroUsize, path::Path};
 
 use crate::{
-    map::{Block, BlockMut, Flags, Header},
+    map::{Block, BlockMut, Flags},
     store::{Data, Store},
 };
 
@@ -324,7 +324,7 @@ mod test {
 
     #[tokio::test]
     async fn test_eviction() {
-        const PATH: &str = "/tmp/cache.reload.test";
+        const PATH: &str = "/tmp/cache.eviction.test";
         // start from clean slate
         let _ = std::fs::remove_file(PATH);
 

@@ -1,0 +1,25 @@
+name: Unit and Integration Test
+
+on: push
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Get Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install capnproto
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v1
+      - name: Unit Testing
+        run: cargo test
+        env:
+          RUST_MIN_STACK: 8388608
