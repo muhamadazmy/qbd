@@ -56,6 +56,10 @@ struct Args {
     #[arg(short, long, default_value_t = SocketAddr::from(([127, 0, 0, 1], 9000)))]
     metrics: SocketAddr,
 
+    /// disable metrics server
+    #[arg(long)]
+    disable_metrics: bool,
+
     /// enable debugging logs
     #[clap(long, action=ArgAction::Count)]
     debug: u8,
@@ -105,11 +109,14 @@ async fn app(args: Args) -> anyhow::Result<()> {
     let device = device::Device::new(cache);
 
     let registry = Arc::new(prometheus::default_registry().clone());
-    tokio::spawn(prometheus_hyper::Server::run(
-        registry,
-        args.metrics,
-        future::pending(),
-    ));
+
+    if !args.disable_metrics {
+        tokio::spawn(prometheus_hyper::Server::run(
+            registry,
+            args.metrics,
+            future::pending(),
+        ));
+    }
 
     let nbd_bs = ByteSize::kib(4);
     nbd_async::serve_local_nbd(

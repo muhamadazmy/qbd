@@ -17,7 +17,9 @@ use super::map::BlockMap;
 use bytesize::ByteSize;
 use lazy_static::lazy_static;
 use lru::LruCache;
-use prometheus::{register_int_counter, register_int_gauge, IntCounter, IntGauge};
+use prometheus::{
+    register_histogram, register_int_counter, register_int_gauge, Histogram, IntCounter, IntGauge,
+};
 
 use crate::{Error, Result};
 
@@ -28,8 +30,18 @@ lazy_static! {
         register_int_counter!("blocks_loaded", "number of blocks loaded from backend").unwrap();
     static ref BLOCKS_CACHED: IntGauge =
         register_int_gauge!("blocks_cached", "number of blocks available in cache").unwrap();
-
-    // TODO add histograms for both read/write and evict operations
+    static ref EVICT_HISTOGRAM: Histogram = register_histogram!(
+        "evict_histogram",
+        "evict histogram",
+        vec![0.001, 0.05, 0.1, 0.5]
+    )
+    .unwrap();
+    static ref LOAD_HISTOGRAM: Histogram = register_histogram!(
+        "load_histogram",
+        "load histogram",
+        vec![0.001, 0.05, 0.1, 0.5]
+    )
+    .unwrap();
 }
 
 /// CachedBlock holds information about blocks in lru memory
@@ -161,7 +173,9 @@ where
             if blk.header().flag(Flags::Dirty) {
                 log::debug!("block {} eviction", *block_index);
                 BLOCKS_EVICTED.inc();
+                let timer = EVICT_HISTOGRAM.start_timer();
                 self.store.set(*block_index, blk.data()).await?;
+                timer.observe_duration();
             } else {
                 log::trace!("block {} eviction skipped", *block_index);
             }
@@ -176,7 +190,9 @@ where
             .set(Flags::Occupied, true);
 
         assert_eq!(blk.header().block(), block, "block header update");
+        let timer = LOAD_HISTOGRAM.start_timer();
         let data = self.store.get(block).await?;
+        timer.observe_duration();
         if let Some(data) = data {
             // override block
             BLOCKS_LOADED.inc();

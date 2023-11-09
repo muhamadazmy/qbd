@@ -1,6 +1,6 @@
 use crate::{cache::Cache, map::Flags, store::Store};
 use lazy_static::lazy_static;
-use prometheus::{register_int_counter, IntCounter};
+use prometheus::{register_histogram, register_int_counter, Histogram, IntCounter};
 use std::io;
 
 lazy_static! {
@@ -20,7 +20,10 @@ lazy_static! {
         register_int_counter!("blocks_evicted", "number of blocks evicted").unwrap();
     static ref DEVICE_FLUSH: IntCounter =
         register_int_counter!("device_flush", "number of flush requests").unwrap();
-
+    static ref IO_READ_HISTOGRAM: Histogram =
+        register_histogram!("io_read_histogram", "read io histogram", vec![0.001, 0.05, 0.1, 0.5]).unwrap();
+    static ref IO_WRITE_HISTOGRAM: Histogram =
+        register_histogram!("io_write_histogram", "write io histogram", vec![0.001, 0.05, 0.1, 0.5]).unwrap();
     // TODO add histograms for both read/write and evict operations
 }
 
@@ -166,6 +169,7 @@ where
     S: Store,
 {
     async fn read(&mut self, offset: u64, buf: &mut [u8]) -> io::Result<()> {
+        let _timer = IO_READ_HISTOGRAM.start_timer();
         match self.inner_read(offset, buf).await {
             Ok(_) => {
                 IO_READ_OP.inc();
@@ -183,6 +187,7 @@ where
 
     /// Write a block of data at offset.
     async fn write(&mut self, offset: u64, buf: &[u8]) -> io::Result<()> {
+        let _timer = IO_WRITE_HISTOGRAM.start_timer();
         match self.inner_write(offset, buf).await {
             Ok(_) => {
                 IO_WRITE_OP.inc();
