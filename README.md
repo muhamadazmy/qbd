@@ -43,6 +43,7 @@ Options:
       --block-size <BLOCK_SIZE>  block size used for both cache and storage [default: "1.0 MiB"]
       --store <STORE>            url to backend store as `file:///path/to/file?size=SIZE` accepts multiple stores, the total size of the disk is the total size of all stores provided
   -m, --metrics <METRICS>        listen address for metrics. metrics will be available at /metrics [default: 127.0.0.1:9000]
+      --disable-metrics          disable metrics server
       --debug...                 enable debugging logs
   -h, --help                     Print help
   -V, --version                  Print version
