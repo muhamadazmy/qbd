@@ -141,7 +141,7 @@ async fn main() -> anyhow::Result<()> {
         .init()?;
 
     if let Err(err) = app(args).await {
-        eprintln!("{:#}", err);
+        eprintln!("error while initializing device: {:#}", err);
         std::process::exit(1);
     }
 

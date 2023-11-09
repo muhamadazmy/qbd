@@ -180,7 +180,12 @@ impl BlockMap {
             .create(true)
             .read(true)
             .write(true)
-            .open(path)?;
+            .open(&path)?;
+
+        let fsize = file.metadata()?.len();
+        if fsize != 0 && fsize != size as u64 {
+            return Err(Error::SizeChanged(path.as_ref().into()));
+        }
 
         unsafe {
             let v = ioctls::fs_ioc_setflags(file.as_raw_fd(), &FS_NOCOW_FL);

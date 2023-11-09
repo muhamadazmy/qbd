@@ -40,7 +40,7 @@ impl Store for SledStore {
             return Err(Error::InvalidBlockSize);
         }
 
-        self.db.insert(index.to_ne_bytes(), data)?;
+        self.db.insert(index.to_be_bytes(), data)?;
         Ok(())
     }
 
@@ -48,7 +48,7 @@ impl Store for SledStore {
         if index >= self.bc {
             return Err(Error::BlockIndexOutOfRange);
         }
-        let data = self.db.get(index.to_ne_bytes())?.map(Data::Owned);
+        let data = self.db.get(index.to_be_bytes())?.map(Data::Owned);
 
         Ok(data)
     }

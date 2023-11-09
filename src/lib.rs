@@ -1,4 +1,7 @@
-use std::io::{Error as IoError, ErrorKind};
+use std::{
+    io::{Error as IoError, ErrorKind},
+    path::PathBuf,
+};
 
 pub mod cache;
 pub mod device;
@@ -26,6 +29,9 @@ pub enum Error {
 
     #[error("sled db error: {0}")]
     Sled(#[from] sled::Error),
+
+    #[error("size change to file {0}")]
+    SizeChanged(PathBuf),
 
     #[error("io error: {0}")]
     IO(#[from] IoError),
