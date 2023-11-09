@@ -28,7 +28,7 @@ impl Header {
     }
 
     pub fn set_block(&mut self, id: u32) -> &mut Self {
-        self.0 |= id as u64 & ID_MASK;
+        self.0 = (self.0 & !ID_MASK) | (id as u64 & ID_MASK);
         self
     }
 
@@ -69,10 +69,22 @@ mod test {
         assert_eq!(true, header.flag(Flags::Dirty));
         assert_eq!(20, header.block());
 
-        header.set_block(30);
-        header.set(Flags::Occupied, true);
+        header.set_block(30).set(Flags::Occupied, true);
         assert_eq!(true, header.flag(Flags::Dirty));
         assert_eq!(true, header.flag(Flags::Occupied));
         assert_eq!(30, header.block());
+    }
+
+    #[test]
+    fn more_flags() {
+        let mut header = Header::new(49);
+        header
+            .set_block(8)
+            .set(Flags::Dirty, false)
+            .set(Flags::Occupied, true);
+
+        assert_eq!(false, header.flag(Flags::Dirty));
+        assert_eq!(true, header.flag(Flags::Occupied));
+        assert_eq!(8, header.block());
     }
 }

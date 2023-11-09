@@ -9,7 +9,7 @@
 use std::{num::NonZeroUsize, path::Path};
 
 use crate::{
-    map::{Block, BlockMut, Flags},
+    map::{Block, BlockMut, Flags, Header},
     store::{Data, Store},
 };
 
@@ -79,6 +79,7 @@ where
         BLOCKS_CACHED.set(cache.len() as i64);
         // to be able to check block boundaries
         let blocks = store.size().as_u64() / bs.as_u64();
+        log::debug!("device blocks: {blocks}");
         Ok(Self {
             map,
             cache,
@@ -174,11 +175,12 @@ where
             .set(Flags::Dirty, false)
             .set(Flags::Occupied, true);
 
+        assert_eq!(blk.header().block(), block, "block header update");
         let data = self.store.get(block).await?;
         if let Some(data) = data {
             // override block
             BLOCKS_LOADED.inc();
-            log::debug!("warming cache for block {block}");
+            log::trace!("warming cache for block {block}");
             blk.data_mut().copy_from_slice(&data);
             blk.update_crc();
         } else {
@@ -203,7 +205,7 @@ where
     }
 
     pub fn flush_range(&self, location: usize, count: usize) -> Result<()> {
-        self.map.flush_range(location, count)
+        self.map.flush_range_async(location, count)
     }
 }
 

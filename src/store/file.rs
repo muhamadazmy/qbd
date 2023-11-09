@@ -33,7 +33,11 @@ impl Store for FileStore {
 
         let mut block = self.map.at_mut(index as usize);
         block.data_mut().copy_from_slice(data);
-        block.header_mut().set(Flags::Occupied, true);
+        block
+            .header_mut()
+            .set_block(index)
+            .set(Flags::Occupied, true);
+        block.update_crc();
 
         // this flushes the block immediately, may
         // be for performance improvements we shouldn't

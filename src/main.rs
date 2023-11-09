@@ -2,7 +2,7 @@ use anyhow::Context;
 use bytesize::ByteSize;
 use clap::{ArgAction, Parser};
 use qbd::{
-    store::{ConcatStore, SledStore, Store},
+    store::{ConcatStore, FileStore, Store},
     *,
 };
 use std::{fmt::Display, future, net::SocketAddr, path::PathBuf, str::FromStr, sync::Arc};
@@ -99,7 +99,7 @@ async fn main() -> anyhow::Result<()> {
         };
 
         stores.push(
-            SledStore::new(u.path(), size, block_size)
+            FileStore::new(u.path(), size, block_size)
                 .with_context(|| format!("failed to create store {u}"))?,
         );
     }
@@ -125,7 +125,15 @@ async fn main() -> anyhow::Result<()> {
         future::pending(),
     ));
 
-    nbd_async::serve_local_nbd(args.nbd, 1024, disk_size.as_u64() / 1024, false, device).await?;
+    let nbd_bs = ByteSize::kib(4);
+    nbd_async::serve_local_nbd(
+        args.nbd,
+        nbd_bs.0 as u32,
+        disk_size.0 / nbd_bs.0,
+        false,
+        device,
+    )
+    .await?;
 
     Ok(())
 }

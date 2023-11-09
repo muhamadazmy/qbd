@@ -33,6 +33,9 @@ impl Store for SledStore {
     type Vec = sled::IVec;
 
     async fn set(&mut self, index: u32, data: &[u8]) -> Result<()> {
+        if index >= self.bc {
+            return Err(Error::BlockIndexOutOfRange);
+        }
         if data.len() != self.bs.0 as usize {
             return Err(Error::InvalidBlockSize);
         }
@@ -42,6 +45,9 @@ impl Store for SledStore {
     }
 
     async fn get(&self, index: u32) -> Result<Option<Data<Self::Vec>>> {
+        if index >= self.bc {
+            return Err(Error::BlockIndexOutOfRange);
+        }
         let data = self.db.get(index.to_ne_bytes())?.map(|d| Data::Owned(d));
 
         Ok(data)

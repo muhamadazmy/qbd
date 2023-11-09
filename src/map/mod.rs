@@ -40,12 +40,12 @@ pub struct Block<'a> {
 }
 
 impl<'a> Block<'a> {
-    /// location of the block in cache
+    /// location is the block location inside the cache
     pub fn location(&self) -> usize {
         self.location
     }
 
-    /// header associated with the block
+    /// return header associated with block at location
     pub fn header(&self) -> &Header {
         unsafe { &*self.header }
     }
@@ -60,7 +60,7 @@ impl<'a> Block<'a> {
         self.crc
     }
 
-    /// data bytes stored on block at location
+    /// data stored on the block at location
     pub fn data(&self) -> &[u8] {
         self.data
     }
@@ -144,14 +144,14 @@ impl BlockMap {
         // - crc segment
         // - data segment
 
-        let size = size.as_u64() as usize;
+        let data_sec_size = size.as_u64() as usize;
         let bs = bs.as_u64() as usize;
 
-        if size == 0 {
+        if data_sec_size == 0 {
             return Err(Error::ZeroSize);
         }
 
-        if bs > size {
+        if bs > data_sec_size {
             return Err(Error::BlockSizeTooBig);
         }
 
@@ -159,11 +159,11 @@ impl BlockMap {
             return Err(Error::BlockSizeTooBig);
         }
 
-        if size % bs != 0 {
+        if data_sec_size % bs != 0 {
             return Err(Error::SizeNotMultipleOfBlockSize);
         }
 
-        let bc = size / bs;
+        let bc = data_sec_size / bs;
 
         // // we can only store u32::MAX blocks
         // // to be able to fit it in header
@@ -171,11 +171,11 @@ impl BlockMap {
         //     return Err(Error::BlockCountTooBig);
         // }
 
-        let header = bc * size_of::<Header>();
-        let crc = bc * size_of::<Crc>();
+        let header_sec_size = bc * size_of::<Header>();
+        let crc_sec_size = bc * size_of::<Crc>();
 
         // the final size is the given data size + header + crc
-        let size = size + header + crc;
+        let size = data_sec_size + header_sec_size + crc_sec_size;
         let file = OpenOptions::new()
             .create(true)
             .read(true)
@@ -202,14 +202,14 @@ impl BlockMap {
             bs,
             header_rng: Range {
                 start: 0,
-                end: header,
+                end: header_sec_size,
             },
             crc_rng: Range {
-                start: header,
-                end: header + crc,
+                start: header_sec_size,
+                end: header_sec_size + crc_sec_size,
             },
             data_rng: Range {
-                start: header + crc,
+                start: header_sec_size + crc_sec_size,
                 end: size,
             },
             map: unsafe { MmapMut::map_mut(&file)? },
@@ -227,12 +227,16 @@ impl BlockMap {
     }
 
     fn header(&self) -> &[Header] {
-        let (_, header, _) = unsafe { self.map[self.header_rng.clone()].align_to::<Header>() };
+        let (h, header, t) = unsafe { self.map[self.header_rng.clone()].align_to::<Header>() };
+        assert!(h.is_empty(), "h is not empty");
+        assert!(t.is_empty(), "t is not empty");
         header
     }
 
     fn crc(&self) -> &[Crc] {
-        let (_, crc, _) = unsafe { self.map[self.crc_rng.clone()].align_to::<Crc>() };
+        let (h, crc, t) = unsafe { self.map[self.crc_rng.clone()].align_to::<Crc>() };
+        assert!(h.is_empty(), "h is not empty");
+        assert!(t.is_empty(), "t is not empty");
         crc
     }
 
@@ -241,12 +245,16 @@ impl BlockMap {
     }
 
     fn header_mut(&mut self) -> &mut [Header] {
-        let (_, header, _) = unsafe { self.map[self.header_rng.clone()].align_to_mut::<Header>() };
+        let (h, header, t) = unsafe { self.map[self.header_rng.clone()].align_to_mut::<Header>() };
+        assert!(h.is_empty(), "h is not empty");
+        assert!(t.is_empty(), "t is not empty");
         header
     }
 
     fn crc_mut(&mut self) -> &mut [Crc] {
-        let (_, crc, _) = unsafe { self.map[self.crc_rng.clone()].align_to_mut::<Crc>() };
+        let (h, crc, t) = unsafe { self.map[self.crc_rng.clone()].align_to_mut::<Crc>() };
+        assert!(h.is_empty(), "h is not empty");
+        assert!(t.is_empty(), "t is not empty");
         crc
     }
 
@@ -344,13 +352,23 @@ impl BlockMap {
         let (mut start, _) = self.data_block_range(location);
         start += self.data_rng.start;
         let len = self.bs * count;
-        log::debug!("flushing block {location}/{count} [{start}: {len}]");
-        self.map.flush_range(start, len)?;
 
         // the header is also flushed but in async way
-        self.map
-            .flush_async_range(0, self.crc_rng.end)
-            .map_err(Error::from)
+        self.map.flush_range(0, self.crc_rng.end)?;
+
+        log::trace!("flushing block {location}/{count} [{start}: {len}]");
+        self.map.flush_range(start, len).map_err(Error::from)
+    }
+
+    pub fn flush_range_async(&self, location: usize, count: usize) -> Result<()> {
+        let (mut start, _) = self.data_block_range(location);
+        start += self.data_rng.start;
+        let len = self.bs * count;
+        // the header is also flushed but in async way
+        self.map.flush_range(0, self.crc_rng.end)?;
+
+        log::trace!("flushing block {location}/{count} [{start}: {len}]");
+        self.map.flush_async_range(start, len).map_err(Error::from)
     }
 
     /// flush a cache to disk
