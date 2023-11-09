@@ -13,6 +13,21 @@ The goal behind building this was the following:
   - This also allows fast retrieval of blocks
 - [ ] Erasure coding
 
+## Building
+
+To build qbd make sure you have rust installed then run the following commands:
+
+```bash
+# this is needed to be run once to make sure the musl target is installed
+rustup target add x86_64-unknown-linux-musl
+
+# build the binary
+cargo build  --release --target=x86_64-unknown-linux-musl
+```
+
+the binary will be available under `./target/x86_64-unknown-linux-musl/release/qbd` you can copy that binary then to `/usr/bin/`
+to be able to use from anywhere on your system.
+
 ## Usage
 
 ```bash
@@ -52,6 +67,8 @@ Note that the `cache-size` **DOES NOT** add to the full size of the `nbd` device
 On cache eviction (when there is no space left in cache) the least used blocks will finally evicted to storage (provided by `store` flag)
 
 ## Example
+
+To be able to attach to `nbd` you need root privileges with `sudo`
 
 ```bash
 sudo qbd -n /dev/nbd0 --cache-size 20gib --cache /opt/disk.cache --store "file:///mnt/disk0/disk.sig0?size=100gib"  --store "file:///mnt/disk1/disk.sig1?size=100gib"
