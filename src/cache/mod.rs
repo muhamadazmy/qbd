@@ -33,13 +33,13 @@ lazy_static! {
     static ref EVICT_HISTOGRAM: Histogram = register_histogram!(
         "nbd_evict_histogram",
         "page eviction histogram",
-        vec![0.001, 0.05, 0.1, 0.5]
+        vec![0.001, 0.010, 0.050, 0.100, 0.250, 0.500]
     )
     .unwrap();
     static ref LOAD_HISTOGRAM: Histogram = register_histogram!(
         "nbd_load_histogram",
         "load eviction histogram",
-        vec![0.001, 0.05, 0.1, 0.5]
+        vec![0.001, 0.010, 0.050, 0.100, 0.250, 0.500]
     )
     .unwrap();
 }

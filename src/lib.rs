@@ -35,6 +35,21 @@ pub enum Error {
     #[error("size change to file {0}")]
     SizeChanged(PathBuf),
 
+    #[error("invalid meta size")]
+    InvalidMetaSize,
+
+    #[error("invalid meta magic")]
+    InvalidMetaMagic,
+
+    #[error("invalid meta version")]
+    InvalidMetaVersion,
+
+    #[error("invalid meta page size")]
+    InvalidMetaPageSize,
+
+    #[error("invalid meta data size")]
+    InvalidMetaDataSize,
+
     #[error("io error: {0}")]
     IO(#[from] IoError),
 }

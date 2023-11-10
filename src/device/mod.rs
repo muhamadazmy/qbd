@@ -21,13 +21,13 @@ lazy_static! {
     static ref IO_READ_HISTOGRAM: Histogram = register_histogram!(
         "nbd_io_read_histogram",
         "read io histogram",
-        vec![0.001, 0.05, 0.1, 0.5]
+        vec![0.001, 0.010, 0.050, 0.100, 0.250, 0.500]
     )
     .unwrap();
     static ref IO_WRITE_HISTOGRAM: Histogram = register_histogram!(
         "nbd_io_write_histogram",
         "write io histogram",
-        vec![0.001, 0.05, 0.1, 0.5]
+        vec![0.001, 0.010, 0.050, 0.100, 0.250, 0.500]
     )
     .unwrap();
 }

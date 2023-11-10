@@ -20,13 +20,15 @@
 //! pre-defined values you can set (flags, id)
 //! the value of the id is a u32 that is associated with that page. It is used to
 //! map this page from this address, to that id on the block device (nbd)
+use crate::{Error, Result};
 use bytesize::ByteSize;
 use memmap2::MmapMut;
 use std::io::{Error as IoError, ErrorKind};
 use std::{fs::OpenOptions, mem::size_of, ops::Range, os::fd::AsRawFd, path::Path};
+
 mod header;
-use crate::{Error, Result};
 pub use header::{Flags, Header};
+mod meta;
 
 pub const MAX_PAGE_SIZE: ByteSize = ByteSize::mb(5);
 pub const CRC: crc::Crc<u64> = crc::Crc::<u64>::new(&crc::CRC_64_GO_ISO);
@@ -129,6 +131,7 @@ impl<'a> From<PageMut<'a>> for Page<'a> {
         }
     }
 }
+
 /// PageMap is an on disk cache
 pub struct PageMap {
     pc: usize,
@@ -140,13 +143,13 @@ pub struct PageMap {
 }
 
 impl PageMap {
-    pub fn new<P: AsRef<Path>>(path: P, size: ByteSize, page_size: ByteSize) -> Result<Self> {
+    pub fn new<P: AsRef<Path>>(path: P, data_size: ByteSize, page_size: ByteSize) -> Result<Self> {
         // we need to have 3 segments in the file.
         // - header segment
         // - crc segment
         // - data segment
 
-        let data_sec_size = size.as_u64() as usize;
+        let data_sec_size = data_size.as_u64() as usize;
         let ps = page_size.as_u64() as usize;
 
         if data_sec_size == 0 {
@@ -177,15 +180,17 @@ impl PageMap {
         let crc_sec_size = pc * size_of::<Crc>();
 
         // the final size is the given data size + header + crc
-        let size = data_sec_size + header_sec_size + crc_sec_size;
+        let full_size = meta::SIZE + header_sec_size + crc_sec_size + data_sec_size;
+
         let file = OpenOptions::new()
             .create(true)
             .read(true)
             .write(true)
             .open(&path)?;
 
-        let fsize = file.metadata()?.len();
-        if fsize != 0 && fsize != size as u64 {
+        let file_size = file.metadata()?.len();
+
+        if file_size != 0 && file_size != full_size as u64 {
             return Err(Error::SizeChanged(path.as_ref().into()));
         }
 
@@ -199,27 +204,62 @@ impl PageMap {
         use nix::fcntl::{fallocate, FallocateFlags};
         // we use fallocate to allocate entire map space on disk so we grantee write operations
         // won't fail
-        fallocate(file.as_raw_fd(), FallocateFlags::empty(), 0, size as i64)
-            .map_err(|e| IoError::new(ErrorKind::Other, e))?;
+        fallocate(
+            file.as_raw_fd(),
+            FallocateFlags::empty(),
+            0,
+            full_size as i64,
+        )
+        .map_err(|e| IoError::new(ErrorKind::Other, e))?;
 
-        //file.set_len(size as u64)?;
-        // we need then to open the underlying file and truncate it
+        let mut map = unsafe { MmapMut::map_mut(&file)? };
+
+        // validation or initializing meta section
+        if file_size == 0 {
+            // this is a new file. we need to set the meta
+            let m = meta::Meta {
+                version: meta::VERSION,
+                data_size: data_size.0,
+                page_size: page_size.0,
+            };
+
+            m.write(&mut map[0..meta::SIZE])?;
+        } else {
+            // we need to validate meta then
+            let m = meta::Meta::load(&map[0..meta::SIZE])?;
+            if m.version != meta::VERSION {
+                return Err(Error::InvalidMetaVersion);
+            }
+
+            if m.page_size != page_size.0 {
+                return Err(Error::InvalidMetaPageSize);
+            }
+
+            if m.data_size != data_size.0 {
+                return Err(Error::InvalidMetaDataSize);
+            }
+        }
+
+        let header_offset = meta::SIZE;
+        let crc_offset = header_offset + header_sec_size;
+        let data_offset = crc_offset + crc_sec_size;
+
         Ok(PageMap {
             pc,
             ps,
             header_rng: Range {
-                start: 0,
-                end: header_sec_size,
+                start: header_offset,
+                end: crc_offset,
             },
             crc_rng: Range {
-                start: header_sec_size,
-                end: header_sec_size + crc_sec_size,
+                start: crc_offset,
+                end: data_offset,
             },
             data_rng: Range {
-                start: header_sec_size + crc_sec_size,
-                end: size,
+                start: data_offset,
+                end: full_size,
             },
-            map: unsafe { MmapMut::map_mut(&file)? },
+            map,
         })
     }
 

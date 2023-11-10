@@ -104,7 +104,8 @@ async fn app(args: Args) -> anyhow::Result<()> {
         page_size.to_string_as(true)
     );
 
-    let cache = cache::Cache::new(store, args.cache, cache_size, page_size)?;
+    let cache = cache::Cache::new(store, args.cache, cache_size, page_size)
+        .context("failed to create cache")?;
 
     let device = device::Device::new(cache);
 
