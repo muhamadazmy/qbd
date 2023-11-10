@@ -2,20 +2,20 @@ use std::path::Path;
 
 use bytesize::ByteSize;
 
-use crate::map::{BlockMap, Flags};
+use crate::map::{Flags, PageMap};
 
 use super::*;
 
 /// persisted storage using BlockMap
 pub struct FileStore {
-    map: BlockMap,
+    map: PageMap,
     size: ByteSize,
 }
 
 impl FileStore {
-    pub fn new<P: AsRef<Path>>(path: P, size: ByteSize, bs: ByteSize) -> Result<Self> {
+    pub fn new<P: AsRef<Path>>(path: P, size: ByteSize, page_size: ByteSize) -> Result<Self> {
         Ok(Self {
-            map: BlockMap::new(path, size, bs).map_err(IoError::from)?,
+            map: PageMap::new(path, size, page_size).map_err(IoError::from)?,
             size,
         })
     }
@@ -26,22 +26,22 @@ impl Store for FileStore {
     type Vec = Vec<u8>;
 
     async fn set(&mut self, index: u32, data: &[u8]) -> Result<()> {
-        if data.len() != self.map.block_size() {
-            return Err(Error::InvalidBlockSize);
+        if data.len() != self.map.page_size() {
+            return Err(Error::InvalidPageSize);
         }
 
         let mut block = self.map.at_mut(index as usize);
         block.data_mut().copy_from_slice(data);
         block
             .header_mut()
-            .set_block(index)
+            .set_page(index)
             .set(Flags::Occupied, true);
         block.update_crc();
 
         // this flushes the block immediately, may
         // be for performance improvements we shouldn't
         // do that or use async way
-        self.map.flush_block(index as usize)
+        self.map.flush_page(index as usize)
     }
 
     async fn get(&self, index: u32) -> Result<Option<Data<Self::Vec>>> {
@@ -61,6 +61,6 @@ impl Store for FileStore {
     }
 
     fn block_size(&self) -> usize {
-        self.map.block_size()
+        self.map.page_size()
     }
 }

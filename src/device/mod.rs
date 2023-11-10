@@ -5,26 +5,31 @@ use std::io;
 
 lazy_static! {
     static ref IO_READ_BYTES: IntCounter =
-        register_int_counter!("io_read_bytes", "number of bytes read").unwrap();
+        register_int_counter!("nbd_io_read_bytes", "number of bytes read").unwrap();
     static ref IO_WRITE_BYTES: IntCounter =
-        register_int_counter!("io_write_bytes", "number of bytes written").unwrap();
+        register_int_counter!("nbd_io_write_bytes", "number of bytes written").unwrap();
     static ref IO_READ_OP: IntCounter =
-        register_int_counter!("io_read_op", "number of read io operations").unwrap();
+        register_int_counter!("nbd_io_read_op", "number of read io operations").unwrap();
     static ref IO_READ_ERR: IntCounter =
-        register_int_counter!("io_read_err", "number of read errors").unwrap();
+        register_int_counter!("nbd_io_read_err", "number of read errors").unwrap();
     static ref IO_WRITE_OP: IntCounter =
-        register_int_counter!("io_write_op", "number of write io operations").unwrap();
+        register_int_counter!("nbd_io_write_op", "number of write io operations").unwrap();
     static ref IO_WRITE_ERR: IntCounter =
-        register_int_counter!("io_write_err", "number of write errors").unwrap();
-    static ref BLOCKS_EVICTED: IntCounter =
-        register_int_counter!("blocks_evicted", "number of blocks evicted").unwrap();
+        register_int_counter!("nbd_io_write_err", "number of write errors").unwrap();
     static ref DEVICE_FLUSH: IntCounter =
-        register_int_counter!("device_flush", "number of flush requests").unwrap();
-    static ref IO_READ_HISTOGRAM: Histogram =
-        register_histogram!("io_read_histogram", "read io histogram", vec![0.001, 0.05, 0.1, 0.5]).unwrap();
-    static ref IO_WRITE_HISTOGRAM: Histogram =
-        register_histogram!("io_write_histogram", "write io histogram", vec![0.001, 0.05, 0.1, 0.5]).unwrap();
-    // TODO add histograms for both read/write and evict operations
+        register_int_counter!("nbd_device_flush", "number of flush requests").unwrap();
+    static ref IO_READ_HISTOGRAM: Histogram = register_histogram!(
+        "nbd_io_read_histogram",
+        "read io histogram",
+        vec![0.001, 0.05, 0.1, 0.5]
+    )
+    .unwrap();
+    static ref IO_WRITE_HISTOGRAM: Histogram = register_histogram!(
+        "nbd_io_write_histogram",
+        "write io histogram",
+        vec![0.001, 0.05, 0.1, 0.5]
+    )
+    .unwrap();
 }
 
 const FLUSH_LENGTH: usize = 4;
@@ -102,8 +107,8 @@ where
 
     /// we can only map blocks index that fits in a u32.
     /// this is because
-    pub fn block_of(&self, offset: u64) -> io::Result<u32> {
-        let block = offset as usize / self.cache.block_size();
+    pub fn page_of(&self, offset: u64) -> io::Result<u32> {
+        let block = offset as usize / self.cache.page_size();
 
         u32::try_from(block).map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))
     }
@@ -111,16 +116,16 @@ where
     async fn inner_read(&mut self, offset: u64, mut buf: &mut [u8]) -> io::Result<()> {
         // find the block
 
-        let mut index = self.block_of(offset)?;
+        let mut index = self.page_of(offset)?;
         // TODO: make sure that index is not beyond the max index size by
         // the cold store.
 
-        let mut inner_offset = offset as usize % self.cache.block_size();
+        let mut inner_offset = offset as usize % self.cache.page_size();
 
         loop {
-            let block = self.cache.get(index).await?;
+            let page = self.cache.get(index).await?;
 
-            let source = &block.data()[inner_offset..];
+            let source = &page.data()[inner_offset..];
             let to_copy = std::cmp::min(source.len(), buf.len());
             buf[..to_copy].copy_from_slice(&source[..to_copy]);
             buf = &mut buf[to_copy..];
@@ -135,19 +140,19 @@ where
 
     /// Write a block of data at offset.
     async fn inner_write(&mut self, offset: u64, mut buf: &[u8]) -> io::Result<()> {
-        let mut index = self.block_of(offset)?;
-        let mut inner_offset = offset as usize % self.cache.block_size();
+        let mut index = self.page_of(offset)?;
+        let mut inner_offset = offset as usize % self.cache.page_size();
 
         loop {
-            let mut block = self.cache.get_mut(index).await?;
-            let dest = &mut block.data_mut()[inner_offset..];
+            let mut page = self.cache.get_mut(index).await?;
+            let dest = &mut page.data_mut()[inner_offset..];
             let to_copy = std::cmp::min(dest.len(), buf.len());
             dest[..to_copy].copy_from_slice(&buf[..to_copy]);
 
             // mark it dirty because it was modified
-            block.header_mut().set(Flags::Dirty, true);
+            page.header_mut().set(Flags::Dirty, true);
 
-            if let Some(flush) = self.flush.append(block.location()) {
+            if let Some(flush) = self.flush.append(page.address()) {
                 self.cache.flush_range(flush.start(), flush.len())?;
             }
 

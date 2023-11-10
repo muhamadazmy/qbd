@@ -5,12 +5,12 @@ across multiple locations with erasure coding so they become quantum safe.
 
 The goal behind building this was the following:
 
-- [x] Allow caching of hot blocks on fast SSD storage
-- [x] Persist colder blocks to a slower storage `HDD`
+- [x] Allow caching of hot pages on fast SSD storage
+- [x] Persist colder pages on a slower storage `HDD`
   - [ ] Also store on remote storage
 - [x] Support multiple persisted storage segments, which allows creating a device bigger than a single HDD available
 - [x] Pre-allocation of cache and storage segments, which grantees writes will never fail (unless underlying device is broken)
-  - This also allows fast retrieval of blocks
+  - This also allows fast retrieval of pages
 - [ ] Erasure coding
 
 ## Building
@@ -39,8 +39,8 @@ Usage: qbd [OPTIONS] --nbd <NBD> --cache <CACHE> --store <STORE>
 Options:
   -n, --nbd <NBD>                path to nbd device to attach to
   -c, --cache <CACHE>            path to the cache file, usually should reside on SSD storage
-      --cache-size <CACHE_SIZE>  cache size has to be multiple of block-size [default: "10.0 GiB"]
-      --block-size <BLOCK_SIZE>  block size used for both cache and storage [default: "1.0 MiB"]
+      --cache-size <CACHE_SIZE>  cache size has to be multiple of page-size [default: "10.0 GiB"]
+      --page-size <PAGE_SIZE>    page size used for both cache and storage [default: "1.0 MiB"]
       --store <STORE>            url to backend store as `file:///path/to/file?size=SIZE` accepts multiple stores, the total size of the disk is the total size of all stores provided
   -m, --metrics <METRICS>        listen address for metrics. metrics will be available at /metrics [default: 127.0.0.1:9000]
       --disable-metrics          disable metrics server
@@ -49,7 +49,7 @@ Options:
   -V, --version                  Print version
 ```
 
-To setup the cache, the `cache-size` (also store size) **MUST** be multiple of `block-size`. The `block-size` is by default `1mib``. This is the size of one commit operation to storage, so if it's too small, there will be many commits on cache eviction, too big will be fewer but bigger write transactions.
+To setup the cache, the `cache-size` (also store size) **MUST** be multiple of `page-size`. The `page-size` is by default `1mib``. This is the size of one commit operation to storage, so if it's too small, there will be many commits on cache eviction, too big will be fewer but bigger write transactions.
 
 The `store` can be provided multiple times on the command line. All stores will be `concatenated` and act as one. This allows you to have an `nbd` device that is bigger than any local `hdd` device alone.
 
@@ -65,7 +65,7 @@ Write now only `file` store is support, it's `URL` must be as follows:
 
 Note that the `cache-size` **DOES NOT** add to the full size of the `nbd` device. Only the total size of provided stores are! the cache works as `WOL` (write ahead log) in the sense that it's part of the database (deleting the cache will cause possible loss of data).
 
-On cache eviction (when there is no space left in cache) the least used blocks will finally evicted to storage (provided by `store` flag)
+On cache eviction (when there is no space left in cache) the least used pages will finally evicted to storage (provided by `store` flag)
 
 ## Example
 
@@ -79,6 +79,6 @@ This will start the service for `/dev/nbd0`, the size of the device will be `200
 
 ## IMPORTANT
 
-- After the first first creation sizes should never be changed. Changing `cache-size`, or `block-size` will render the entire cache invalid which will cause loss of data. Same applies to `store` size. But it's possible to extend the device by adding extra store.
+- After the first first creation sizes should never be changed. Changing `cache-size`, or `page-size` will render the entire cache invalid which will cause loss of data. Same applies to `store` size. But it's possible to extend the device by adding extra store.
 - The order of how the `--store` are provided matters. in the example above `disk.sig0` comes before `disk.sig1` changing the order in a next run will again cause data loss
 - We will add protection against those kind of mistakes later on

@@ -13,19 +13,21 @@ pub enum Error {
     #[error("size cannot be zero")]
     ZeroSize,
 
-    #[error("block size is too big")]
-    BlockSizeTooBig,
+    #[error("page size is too big")]
+    PageSizeTooBig,
 
-    #[error("invalid block size")]
-    InvalidBlockSize,
+    #[error("page count is too big")]
+    PageCountTooBig,
 
-    #[error("block index out of range")]
-    BlockIndexOutOfRange,
+    #[error("invalid page size")]
+    InvalidPageSize,
+
+    #[error("page index out of range")]
+    PageIndexOutOfRange,
 
     // #[error("block count is too big")]
-    // BlockCountTooBig,
-    #[error("size must be multiple of block size")]
-    SizeNotMultipleOfBlockSize,
+    #[error("page size must be multiple of block size")]
+    SizeNotMultipleOfPageSize,
 
     #[error("sled db error: {0}")]
     Sled(#[from] sled::Error),

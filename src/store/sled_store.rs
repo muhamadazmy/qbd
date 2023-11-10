@@ -34,10 +34,10 @@ impl Store for SledStore {
 
     async fn set(&mut self, index: u32, data: &[u8]) -> Result<()> {
         if index >= self.bc {
-            return Err(Error::BlockIndexOutOfRange);
+            return Err(Error::PageIndexOutOfRange);
         }
         if data.len() != self.bs.0 as usize {
-            return Err(Error::InvalidBlockSize);
+            return Err(Error::InvalidPageSize);
         }
 
         self.db.insert(index.to_be_bytes(), data)?;
@@ -46,7 +46,7 @@ impl Store for SledStore {
 
     async fn get(&self, index: u32) -> Result<Option<Data<Self::Vec>>> {
         if index >= self.bc {
-            return Err(Error::BlockIndexOutOfRange);
+            return Err(Error::PageIndexOutOfRange);
         }
         let data = self.db.get(index.to_be_bytes())?.map(Data::Owned);
 

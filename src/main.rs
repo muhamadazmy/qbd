@@ -38,13 +38,13 @@ struct Args {
     #[arg(short, long)]
     cache: PathBuf,
 
-    /// cache size has to be multiple of block-size
+    /// cache size has to be multiple of page-size
     #[arg(long, default_value_t=BSWrapper(bytesize::ByteSize::gib(10)))]
     cache_size: BSWrapper,
 
-    /// block size used for both cache and storage
+    /// page size used for both cache and storage
     #[arg(long, default_value_t=BSWrapper(bytesize::ByteSize::mib(1)))]
-    block_size: BSWrapper,
+    page_size: BSWrapper,
 
     /// url to backend store as `file:///path/to/file?size=SIZE`
     /// accepts multiple stores, the total size of the disk
@@ -67,10 +67,10 @@ struct Args {
 
 async fn app(args: Args) -> anyhow::Result<()> {
     let cache_size = args.cache_size.0;
-    let block_size = args.block_size.0;
+    let page_size = args.page_size.0;
 
-    if cache_size.as_u64() % block_size.as_u64() != 0 {
-        anyhow::bail!("cache-size must be multiple of block-size");
+    if cache_size.as_u64() % page_size.as_u64() != 0 {
+        anyhow::bail!("cache-size must be multiple of page-size");
     }
 
     // todo: probably move building of a store from url
@@ -89,7 +89,7 @@ async fn app(args: Args) -> anyhow::Result<()> {
         };
 
         stores.push(
-            FileStore::new(u.path(), size, block_size)
+            FileStore::new(u.path(), size, page_size)
                 .with_context(|| format!("failed to create store {u}"))?,
         );
     }
@@ -98,13 +98,13 @@ async fn app(args: Args) -> anyhow::Result<()> {
 
     let disk_size = store.size();
     log::info!(
-        "size: {} cache-size: {}, block-size: {}",
+        "size: {} cache-size: {}, page-size: {}",
         disk_size.to_string_as(true),
         cache_size.to_string_as(true),
-        block_size.to_string_as(true)
+        page_size.to_string_as(true)
     );
 
-    let cache = cache::Cache::new(store, args.cache, cache_size, block_size)?;
+    let cache = cache::Cache::new(store, args.cache, cache_size, page_size)?;
 
     let device = device::Device::new(cache);
 

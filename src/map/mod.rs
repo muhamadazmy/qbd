@@ -1,23 +1,25 @@
-//! Block map
-//! This is a map implementation that stores blocks on a persisted file.
+//! Page map
+//! This is a map implementation that stores pages on a persisted file.
 //! A map is created over a file, the file is truncated to the needed size
-//! to support provided (size) and block size (bs)
+//! to support provided (size) and page size (page_size)
 //!
-//! a block is associated with a header that container information about the block
+//! a page is associated with a header that container information about the page
 //! (id, flags, and crc)
 //!
 //! it's up to the user of this map to make sense of the stored values
 //!
 //! This works by mapping a file to memory with  mmap. The file is then split into 3 segments
-//! as follows where N is number of blocks
+//! as follows where N is number of pages
 //!  - Headers section, size = N * size(u64),
 //!    please check header docs
 //!  - CRC section, size = N * size(u64)
-//!  - DATA section, size = N * BS
+//!  - DATA section, size = N * PS
 //!
-//! A block then is consisted of (header, crc, data) as defined by `Block`. It's up
+//! A page then is consisted of (header, crc, data) as defined by `Page`. It's up
 //! to the user of the map to calculate and set CRC. Header on the other hand has
-//! pre-defined values you can set (flags, id) but the value of `id`
+//! pre-defined values you can set (flags, id)
+//! the value of the id is a u32 that is associated with that page. It is used to
+//! map this page from this address, to that id on the block device (nbd)
 use bytesize::ByteSize;
 use memmap2::MmapMut;
 use std::io::{Error as IoError, ErrorKind};
@@ -26,26 +28,26 @@ mod header;
 use crate::{Error, Result};
 pub use header::{Flags, Header};
 
-pub const MAX_BLOCK_SIZE: ByteSize = ByteSize::mb(5);
+pub const MAX_PAGE_SIZE: ByteSize = ByteSize::mb(5);
 pub const CRC: crc::Crc<u64> = crc::Crc::<u64>::new(&crc::CRC_64_GO_ISO);
 const FS_NOCOW_FL: i64 = 0x00800000;
 
 pub type Crc = u64;
-/// Block is a read-only block data from the cache
-pub struct Block<'a> {
-    location: usize,
+/// Page is a read-only page data from the cache
+pub struct Page<'a> {
+    address: usize,
     header: *const Header,
     data: &'a [u8],
     crc: Crc,
 }
 
-impl<'a> Block<'a> {
-    /// location is the block location inside the cache
-    pub fn location(&self) -> usize {
-        self.location
+impl<'a> Page<'a> {
+    /// address of this page  inside the map
+    pub fn address(&self) -> usize {
+        self.address
     }
 
-    /// return header associated with block at location
+    /// return header associated with page at address
     pub fn header(&self) -> &Header {
         unsafe { &*self.header }
     }
@@ -55,37 +57,37 @@ impl<'a> Block<'a> {
         self.crc == CRC.checksum(self.data())
     }
 
-    /// returns crc stored on the block
+    /// returns crc stored on the page
     pub fn crc(&self) -> Crc {
         self.crc
     }
 
-    /// data stored on the block at location
+    /// data stored on the page at address
     pub fn data(&self) -> &[u8] {
         self.data
     }
 }
 
-/// BlockMut is a mut block
-pub struct BlockMut<'a> {
-    location: usize,
+/// PageMut is a mut page
+pub struct PageMut<'a> {
+    address: usize,
     header: *mut Header,
     data: &'a mut [u8],
     crc: *mut Crc,
 }
 
-impl<'a> BlockMut<'a> {
-    /// location is the block location inside the cache
-    pub fn location(&self) -> usize {
-        self.location
+impl<'a> PageMut<'a> {
+    /// address of this page  inside the map
+    pub fn address(&self) -> usize {
+        self.address
     }
 
-    /// return header associated with block at location
+    /// return header associated with page at location
     pub fn header(&self) -> &Header {
         unsafe { &*self.header }
     }
 
-    /// sets header associated with block at location
+    /// sets header associated with page at location
     pub fn header_mut(&mut self) -> &mut Header {
         unsafe { &mut *self.header }
     }
@@ -95,7 +97,7 @@ impl<'a> BlockMut<'a> {
         unsafe { *self.crc == CRC.checksum(self.data()) }
     }
 
-    /// returns crc stored on the block
+    /// returns crc stored on the page
     pub fn crc(&self) -> Crc {
         unsafe { *self.crc }
     }
@@ -107,7 +109,7 @@ impl<'a> BlockMut<'a> {
         }
     }
 
-    /// data stored on the block at location
+    /// data stored on the page at address
     pub fn data(&self) -> &[u8] {
         self.data
     }
@@ -117,62 +119,62 @@ impl<'a> BlockMut<'a> {
     }
 }
 
-impl<'a> From<BlockMut<'a>> for Block<'a> {
-    fn from(value: BlockMut<'a>) -> Self {
+impl<'a> From<PageMut<'a>> for Page<'a> {
+    fn from(value: PageMut<'a>) -> Self {
         Self {
-            location: value.location,
+            address: value.address,
             data: value.data,
             crc: value.crc(),
             header: value.header,
         }
     }
 }
-/// BlockCache is an on disk cache
-pub struct BlockMap {
-    bc: usize,
-    bs: usize,
+/// PageMap is an on disk cache
+pub struct PageMap {
+    pc: usize,
+    ps: usize,
     header_rng: Range<usize>,
     crc_rng: Range<usize>,
     data_rng: Range<usize>,
     map: MmapMut,
 }
 
-impl BlockMap {
-    pub fn new<P: AsRef<Path>>(path: P, size: ByteSize, bs: ByteSize) -> Result<Self> {
+impl PageMap {
+    pub fn new<P: AsRef<Path>>(path: P, size: ByteSize, page_size: ByteSize) -> Result<Self> {
         // we need to have 3 segments in the file.
         // - header segment
         // - crc segment
         // - data segment
 
         let data_sec_size = size.as_u64() as usize;
-        let bs = bs.as_u64() as usize;
+        let ps = page_size.as_u64() as usize;
 
         if data_sec_size == 0 {
             return Err(Error::ZeroSize);
         }
 
-        if bs > data_sec_size {
-            return Err(Error::BlockSizeTooBig);
+        if ps > data_sec_size {
+            return Err(Error::PageSizeTooBig);
         }
 
-        if bs > MAX_BLOCK_SIZE.as_u64() as usize {
-            return Err(Error::BlockSizeTooBig);
+        if ps > MAX_PAGE_SIZE.as_u64() as usize {
+            return Err(Error::PageSizeTooBig);
         }
 
-        if data_sec_size % bs != 0 {
-            return Err(Error::SizeNotMultipleOfBlockSize);
+        if data_sec_size % ps != 0 {
+            return Err(Error::SizeNotMultipleOfPageSize);
         }
 
-        let bc = data_sec_size / bs;
+        let pc = data_sec_size / ps;
 
-        // // we can only store u32::MAX blocks
-        // // to be able to fit it in header
-        // if bc > u32::MAX as usize {
-        //     return Err(Error::BlockCountTooBig);
-        // }
+        // we can only store u32::MAX pages
+        // to be able to fit it in header
+        if pc > u32::MAX as usize {
+            return Err(Error::PageCountTooBig);
+        }
 
-        let header_sec_size = bc * size_of::<Header>();
-        let crc_sec_size = bc * size_of::<Crc>();
+        let header_sec_size = pc * size_of::<Header>();
+        let crc_sec_size = pc * size_of::<Crc>();
 
         // the final size is the given data size + header + crc
         let size = data_sec_size + header_sec_size + crc_sec_size;
@@ -202,9 +204,9 @@ impl BlockMap {
 
         //file.set_len(size as u64)?;
         // we need then to open the underlying file and truncate it
-        Ok(BlockMap {
-            bc,
-            bs,
+        Ok(PageMap {
+            pc,
+            ps,
             header_rng: Range {
                 start: 0,
                 end: header_sec_size,
@@ -221,14 +223,14 @@ impl BlockMap {
         })
     }
 
-    /// capacity of cache returns max number of blocks
-    pub fn block_count(&self) -> usize {
-        self.bc
+    /// capacity of cache returns max number of pages
+    pub fn page_count(&self) -> usize {
+        self.pc
     }
 
-    /// return block size of cache
-    pub fn block_size(&self) -> usize {
-        self.bs
+    /// return page size of cache
+    pub fn page_size(&self) -> usize {
+        self.ps
     }
 
     fn header(&self) -> &[Header] {
@@ -270,8 +272,8 @@ impl BlockMap {
     /// returns the offset inside the data region
     #[inline]
     fn data_block_range(&self, index: usize) -> (usize, usize) {
-        let data_offset = index * self.bs;
-        (data_offset, data_offset + self.bs)
+        let data_offset = index * self.ps;
+        (data_offset, data_offset + self.ps)
     }
 
     #[inline]
@@ -306,73 +308,73 @@ impl BlockMap {
         &mut self.crc_mut()[index]
     }
 
-    /// iter over all blocks in cache
-    pub fn iter(&self) -> impl Iterator<Item = Block> {
-        CacheIter {
+    /// iter over all pages in cache
+    pub fn iter(&self) -> impl Iterator<Item = Page> {
+        PageIter {
             cache: self,
             current: 0,
         }
     }
 
-    /// gets a block at location
-    pub fn at(&self, location: usize) -> Block {
-        if location >= self.bc {
+    /// gets a page at location
+    pub fn at(&self, address: usize) -> Page {
+        if address >= self.pc {
             panic!("index out of range");
         }
 
-        let data = self.data_at(location);
-        let header: *const Header = self.header_at(location);
-        let crc = self.crc_at(location);
-        Block {
-            location,
+        let data = self.data_at(address);
+        let header: *const Header = self.header_at(address);
+        let crc = self.crc_at(address);
+        Page {
+            address,
             header,
             data,
             crc,
         }
     }
 
-    /// gets a block_mut at location
-    pub fn at_mut(&mut self, location: usize) -> BlockMut {
-        if location >= self.bc {
+    /// gets a page at location
+    pub fn at_mut(&mut self, address: usize) -> PageMut {
+        if address >= self.pc {
             panic!("index out of range");
         }
 
-        let header: *mut Header = self.header_mut_at(location);
-        let crc: *mut Crc = self.crc_mut_at(location);
-        let data = self.data_mut_at(location);
-        BlockMut {
-            location,
+        let header: *mut Header = self.header_mut_at(address);
+        let crc: *mut Crc = self.crc_mut_at(address);
+        let data = self.data_mut_at(address);
+        PageMut {
+            address,
             header,
             data,
             crc,
         }
     }
 
-    /// flush_block flushes a block and wait for it until it is written to disk
-    pub fn flush_block(&self, location: usize) -> Result<()> {
-        self.flush_range(location, 1)
+    /// flush_page flushes a page and wait for it until it is written to disk
+    pub fn flush_page(&self, address: usize) -> Result<()> {
+        self.flush_range(address, 1)
     }
 
-    pub fn flush_range(&self, location: usize, count: usize) -> Result<()> {
-        let (mut start, _) = self.data_block_range(location);
+    pub fn flush_range(&self, address: usize, count: usize) -> Result<()> {
+        let (mut start, _) = self.data_block_range(address);
         start += self.data_rng.start;
-        let len = self.bs * count;
+        let len = self.ps * count;
 
         // the header is also flushed but in async way
         self.map.flush_range(0, self.crc_rng.end)?;
 
-        log::trace!("flushing block {location}/{count} [{start}: {len}]");
+        log::trace!("flushing page {address}/{count} [{start}: {len}]");
         self.map.flush_range(start, len).map_err(Error::from)
     }
 
-    pub fn flush_range_async(&self, location: usize, count: usize) -> Result<()> {
-        let (mut start, _) = self.data_block_range(location);
+    pub fn flush_range_async(&self, address: usize, count: usize) -> Result<()> {
+        let (mut start, _) = self.data_block_range(address);
         start += self.data_rng.start;
-        let len = self.bs * count;
+        let len = self.ps * count;
         // the header is also flushed but in async way
         self.map.flush_range(0, self.crc_rng.end)?;
 
-        log::trace!("flushing block {location}/{count} [{start}: {len}]");
+        log::trace!("flushing page {address}/{count} [{start}: {len}]");
         self.map.flush_async_range(start, len).map_err(Error::from)
     }
 
@@ -383,22 +385,22 @@ impl BlockMap {
     }
 }
 
-struct CacheIter<'a> {
-    cache: &'a BlockMap,
+struct PageIter<'a> {
+    cache: &'a PageMap,
     current: usize,
 }
 
-impl<'a> Iterator for CacheIter<'a> {
-    type Item = Block<'a>;
+impl<'a> Iterator for PageIter<'a> {
+    type Item = Page<'a>;
     fn next(&mut self) -> Option<Self::Item> {
-        if self.current == self.cache.bc {
+        if self.current == self.cache.pc {
             return None;
         }
 
-        let block = self.cache.at(self.current);
+        let page = self.cache.at(self.current);
         self.current += 1;
 
-        Some(block)
+        Some(page)
     }
 }
 
@@ -431,7 +433,7 @@ mod test {
     #[test]
     fn segments() {
         const PATH: &str = "/tmp/segments.test";
-        let mut cache = BlockMap::new(PATH, ByteSize::mib(10), ByteSize::mib(1)).unwrap();
+        let mut cache = PageMap::new(PATH, ByteSize::mib(10), ByteSize::mib(1)).unwrap();
 
         let _d = Defer::new(|| {
             std::fs::remove_file(PATH).unwrap();
@@ -471,7 +473,7 @@ mod test {
     #[test]
     fn iterator() {
         const PATH: &str = "/tmp/iter.test";
-        let cache = BlockMap::new(PATH, ByteSize::mib(10), ByteSize::mib(1)).unwrap();
+        let cache = PageMap::new(PATH, ByteSize::mib(10), ByteSize::mib(1)).unwrap();
 
         let _d = Defer::new(|| {
             std::fs::remove_file(PATH).unwrap();
@@ -491,64 +493,63 @@ mod test {
     #[test]
     fn edit() {
         const PATH: &str = "/tmp/edit.test";
-        let mut cache = BlockMap::new(PATH, ByteSize::mib(10), ByteSize::mib(1)).unwrap();
+        let mut cache = PageMap::new(PATH, ByteSize::mib(10), ByteSize::mib(1)).unwrap();
 
         let _d = Defer::new(|| {
             std::fs::remove_file(PATH).unwrap();
         });
 
-        let mut block = cache.at_mut(0);
+        let mut page = cache.at_mut(0);
 
-        block
-            .header_mut()
-            .set_block(10)
+        page.header_mut()
+            .set_page(10)
             .set(header::Flags::Occupied, true)
             .set(header::Flags::Dirty, true);
 
-        block.data_mut().fill(b'D');
-        block.update_crc();
+        page.data_mut().fill(b'D');
+        page.update_crc();
 
-        let block = cache
+        let page = cache
             .iter()
             .filter(|b| b.header().flag(header::Flags::Dirty))
             .next();
 
-        assert!(block.is_some());
+        assert!(page.is_some());
 
-        let block = block.unwrap();
-        assert_eq!(10, block.header().block());
-        assert_eq!(1024 * 1024, block.data().len());
+        let page = page.unwrap();
+        assert_eq!(10, page.header().page());
+        assert_eq!(1024 * 1024, page.data().len());
         // all data should equal to 'D' as set above
-        assert!(block.data().iter().all(|b| *b == b'D'));
+        assert!(page.data().iter().all(|b| *b == b'D'));
     }
 
     #[test]
     fn test_big() {
         const PATH: &str = "/tmp/map.big.test";
-        let mut cache = BlockMap::new(PATH, ByteSize::gib(1), ByteSize::mib(1)).unwrap();
+        let mut cache = PageMap::new(PATH, ByteSize::gib(1), ByteSize::mib(1)).unwrap();
 
         let _d = Defer::new(|| {
             std::fs::remove_file(PATH).unwrap();
         });
 
-        assert_eq!(cache.block_count(), 1024);
-        // that's 1024 blocks given the cache params
-        for loc in 0..cache.block_count() {
-            let mut block = cache.at_mut(loc);
+        assert_eq!(cache.page_count(), 1024);
+        // that's 1024 pages given the cache params
+        for loc in 0..cache.page_count() {
+            let mut page = cache.at_mut(loc);
 
-            block.data_mut().fill_with(|| loc as u8);
-            block.header_mut().set(Flags::Dirty, true);
+            page.data_mut().fill_with(|| loc as u8);
+            page.header_mut().set(Flags::Dirty, true);
         }
 
         drop(cache);
 
-        let cache = BlockMap::new(PATH, ByteSize::gib(1), ByteSize::mib(1)).unwrap();
-        for loc in 0..cache.block_count() {
-            let block = cache.at(loc);
+        let cache = PageMap::new(PATH, ByteSize::gib(1), ByteSize::mib(1)).unwrap();
+        for loc in 0..cache.page_count() {
+            let page = cache.at(loc);
 
-            assert!(block.header().flag(Flags::Dirty));
+            assert!(page.header().flag(Flags::Dirty));
 
-            block.data().iter().all(|v| *v == loc as u8);
+            page.data().iter().all(|v| *v == loc as u8);
         }
     }
 }

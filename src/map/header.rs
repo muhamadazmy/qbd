@@ -24,12 +24,12 @@ impl Header {
         Self(block as u64)
     }
     /// gets the block index
-    pub fn block(&self) -> u32 {
+    pub fn page(&self) -> u32 {
         (self.0 & ID_MASK) as u32
     }
 
-    /// set block id stored in that header
-    pub fn set_block(&mut self, id: u32) -> &mut Self {
+    /// set page id stored in that header
+    pub fn set_page(&mut self, id: u32) -> &mut Self {
         self.0 = (self.0 & !ID_MASK) | (id as u64 & ID_MASK);
         self
     }
@@ -58,7 +58,7 @@ mod test {
     #[test]
     fn id() {
         let header = Header::new(20);
-        assert_eq!(20, header.block());
+        assert_eq!(20, header.page());
     }
 
     #[test]
@@ -69,24 +69,24 @@ mod test {
         let mut header = Header::new(20);
         header.set(Flags::Dirty, true);
         assert_eq!(true, header.flag(Flags::Dirty));
-        assert_eq!(20, header.block());
+        assert_eq!(20, header.page());
 
-        header.set_block(30).set(Flags::Occupied, true);
+        header.set_page(30).set(Flags::Occupied, true);
         assert_eq!(true, header.flag(Flags::Dirty));
         assert_eq!(true, header.flag(Flags::Occupied));
-        assert_eq!(30, header.block());
+        assert_eq!(30, header.page());
     }
 
     #[test]
     fn more_flags() {
         let mut header = Header::new(49);
         header
-            .set_block(8)
+            .set_page(8)
             .set(Flags::Dirty, false)
             .set(Flags::Occupied, true);
 
         assert_eq!(false, header.flag(Flags::Dirty));
         assert_eq!(true, header.flag(Flags::Occupied));
-        assert_eq!(8, header.block());
+        assert_eq!(8, header.page());
     }
 }

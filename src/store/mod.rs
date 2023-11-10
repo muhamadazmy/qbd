@@ -62,7 +62,7 @@ where
 
         let bs = parts[0].block_size();
         if !parts.iter().all(|f| f.block_size() == bs) {
-            return Err(Error::InvalidBlockSize);
+            return Err(Error::InvalidPageSize);
         }
 
         Ok(Self { parts, bs })
@@ -87,7 +87,7 @@ where
             index -= bc;
         }
 
-        Err(Error::BlockIndexOutOfRange)
+        Err(Error::PageIndexOutOfRange)
     }
 
     async fn get(&self, index: u32) -> Result<Option<Data<Self::Vec>>> {
@@ -101,7 +101,7 @@ where
             index -= bc;
         }
 
-        Err(Error::BlockIndexOutOfRange)
+        Err(Error::PageIndexOutOfRange)
     }
 
     fn size(&self) -> ByteSize {
