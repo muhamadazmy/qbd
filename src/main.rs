@@ -1,11 +1,13 @@
 use anyhow::Context;
 use bytesize::ByteSize;
 use clap::{ArgAction, Parser};
+use nbd_async::NoControl;
 use qbd::{
     store::{ConcatStore, FileStore, Store},
     *,
 };
 use std::{fmt::Display, future, net::SocketAddr, path::PathBuf, str::FromStr, sync::Arc};
+
 /// This wrapper is only to overcome the default
 /// stupid format of ByteSize which uses MB/GB units instead
 /// of MiB/GiB units
@@ -119,6 +121,17 @@ async fn app(args: Args) -> anyhow::Result<()> {
         ));
     }
 
+    //let (_ctl, recv) = channel(1);
+
+    // tokio::spawn(async {
+    //     ctr
+    // });
+    // tokio::spawn(async move {
+    //     tokio::time::sleep(Duration::from_secs(10)).await;
+    //     ctl.send(nbd_async::Control::Notify(10u64)).await.unwrap();
+    //     ctl.send(nbd_async::Control::Shutdown).await.unwrap();
+    // });
+
     let nbd_bs = ByteSize::kib(4);
     nbd_async::serve_local_nbd(
         args.nbd,
@@ -126,6 +139,7 @@ async fn app(args: Args) -> anyhow::Result<()> {
         disk_size.0 / nbd_bs.0,
         false,
         device,
+        NoControl,
     )
     .await?;
 

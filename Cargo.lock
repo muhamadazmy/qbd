@@ -646,8 +646,7 @@ dependencies = [
 [[package]]
 name = "nbd-async"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19358d9ca85c85912bc7a84b3895d97c226dd2e1c5d6fca5adda6014e338424c"
+source = "git+https://github.com/muhamadazmy/nbd-async.git?branch=main#779695faea95f0877acfb3551a49aa83ac7f4adf"
 dependencies = [
  "async-trait",
  "byteorder",
@@ -863,6 +862,7 @@ dependencies = [
  "sled",
  "thiserror",
  "tokio",
+ "tokio-stream",
  "url",
 ]
 
@@ -1124,6 +1124,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.38",
+]
+
+[[package]]
+name = "tokio-stream"
+version = "0.1.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "397c988d37662c7dda6d2208364a706264bf3d6138b11d436cbac0ad38832842"
+dependencies = [
+ "futures-core",
+ "pin-project-lite",
+ "tokio",
 ]
 
 [[package]]

@@ -1,5 +1,6 @@
 use crate::{cache::Cache, map::Flags, store::Store};
 use lazy_static::lazy_static;
+use nbd_async::{BlockDevice, Control};
 use prometheus::{register_histogram, register_int_counter, Histogram, IntCounter};
 use std::io;
 
@@ -169,7 +170,7 @@ where
 }
 
 #[async_trait::async_trait(?Send)]
-impl<S> nbd_async::BlockDevice for Device<S>
+impl<S> BlockDevice for Device<S>
 where
     S: Store,
 {
