@@ -1,12 +1,19 @@
 use anyhow::Context;
 use bytesize::ByteSize;
 use clap::{ArgAction, Parser};
-use nbd_async::NoControl;
+use nbd_async::Control;
 use qbd::{
+    device::Notify,
     store::{ConcatStore, FileStore, Store},
     *,
 };
-use std::{fmt::Display, future, net::SocketAddr, path::PathBuf, str::FromStr, sync::Arc};
+use std::{
+    fmt::Display, future, net::SocketAddr, path::PathBuf, str::FromStr, sync::Arc, time::Duration,
+};
+use tokio::sync::mpsc::{channel, Sender};
+use tokio_stream::wrappers::ReceiverStream;
+
+const JANITOR_DURATION: Duration = Duration::from_secs(1);
 
 /// This wrapper is only to overcome the default
 /// stupid format of ByteSize which uses MB/GB units instead
@@ -121,16 +128,21 @@ async fn app(args: Args) -> anyhow::Result<()> {
         ));
     }
 
-    //let (_ctl, recv) = channel(1);
+    let (ctl, recv) = channel(1);
 
-    // tokio::spawn(async {
-    //     ctr
-    // });
-    // tokio::spawn(async move {
-    //     tokio::time::sleep(Duration::from_secs(10)).await;
-    //     ctl.send(nbd_async::Control::Notify(10u64)).await.unwrap();
-    //     ctl.send(nbd_async::Control::Shutdown).await.unwrap();
-    // });
+    handle_signals(ctl.clone()).context("handling hangup signals")?;
+
+    tokio::spawn(async move {
+        // this keep sending notify jobs to the device.
+        // we attach a notify object carries a duration.
+        // the device will only handle this is if it has been
+        // ideal for that long
+        let notify = Notify::ideal(JANITOR_DURATION);
+        loop {
+            ctl.send(Control::Notify(notify)).await.unwrap();
+            tokio::time::sleep(JANITOR_DURATION).await;
+        }
+    });
 
     let nbd_bs = ByteSize::kib(4);
     nbd_async::serve_local_nbd(
@@ -139,9 +151,31 @@ async fn app(args: Args) -> anyhow::Result<()> {
         disk_size.0 / nbd_bs.0,
         false,
         device,
-        NoControl,
+        ReceiverStream::new(recv),
     )
     .await?;
+
+    log::info!("shutting down");
+    Ok(())
+}
+
+fn handle_signals(ctr: Sender<Control<Notify>>) -> Result<()> {
+    use tokio::signal::unix::{signal, SignalKind};
+
+    // it's stupid we can't have one channel for all signals
+    let mut hu = signal(SignalKind::hangup())?;
+    let mut iu = signal(SignalKind::interrupt())?;
+    let mut te = signal(SignalKind::terminate())?;
+
+    tokio::spawn(async move {
+        tokio::select! {
+            _ = hu.recv() => {},
+            _ = iu.recv() => {},
+            _ = te.recv() => {},
+        }
+
+        let _ = ctr.send(Control::Shutdown).await;
+    });
 
     Ok(())
 }

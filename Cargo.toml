@@ -17,7 +17,7 @@ path="src/main.rs"
 nbd-async = { git = "https://github.com/muhamadazmy/nbd-async.git", branch="main" } #"0.6.0"
 memmap2 = "0.7"
 async-trait = "0.1"
-tokio = { version = "1.29", features=["rt", "macros", "rt-multi-thread", "io-std", "fs", "sync"] }
+tokio = { version = "1.29", features=["rt", "macros", "rt-multi-thread", "io-std", "fs", "sync", "signal"] }
 thiserror = "1"
 lru = "0.12"
 crc = "3.0.1"

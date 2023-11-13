@@ -2,7 +2,10 @@ use crate::{cache::Cache, map::Flags, store::Store};
 use lazy_static::lazy_static;
 use nbd_async::{BlockDevice, Control};
 use prometheus::{register_histogram, register_int_counter, Histogram, IntCounter};
-use std::io;
+use std::{
+    io,
+    time::{Duration, Instant},
+};
 
 lazy_static! {
     static ref IO_READ_BYTES: IntCounter =
@@ -83,6 +86,17 @@ impl FlushRange {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+
+pub enum Notify {
+    Ideal(Duration),
+}
+
+impl Notify {
+    pub fn ideal(after: Duration) -> Self {
+        Notify::Ideal(after)
+    }
+}
 /// implementation of the nbd device
 ///
 /// The device mainly works against a cache object
@@ -93,6 +107,7 @@ where
 {
     cache: Cache<S>,
     flush: FlushRange,
+    atime: Instant,
 }
 
 impl<S> Device<S>
@@ -103,6 +118,7 @@ where
         Self {
             cache,
             flush: FlushRange::default(),
+            atime: Instant::now(),
         }
     }
 
@@ -170,11 +186,12 @@ where
 }
 
 #[async_trait::async_trait(?Send)]
-impl<S> BlockDevice for Device<S>
+impl<S> BlockDevice<Notify> for Device<S>
 where
     S: Store,
 {
     async fn read(&mut self, offset: u64, buf: &mut [u8]) -> io::Result<()> {
+        self.atime = Instant::now();
         let _timer = IO_READ_HISTOGRAM.start_timer();
         match self.inner_read(offset, buf).await {
             Ok(_) => {
@@ -193,6 +210,7 @@ where
 
     /// Write a block of data at offset.
     async fn write(&mut self, offset: u64, buf: &[u8]) -> io::Result<()> {
+        self.atime = Instant::now();
         let _timer = IO_WRITE_HISTOGRAM.start_timer();
         match self.inner_write(offset, buf).await {
             Ok(_) => {
@@ -212,6 +230,20 @@ where
     async fn flush(&mut self) -> io::Result<()> {
         DEVICE_FLUSH.inc();
         self.cache.flush()?;
+        Ok(())
+    }
+
+    /// called if a new control message is available on control stream
+    async fn control(&mut self, control: &Control<Notify>) -> io::Result<()> {
+        match control {
+            Control::Shutdown => {}
+            Control::Notify(Notify::Ideal(duration)) => {
+                if self.atime.elapsed() > *duration {
+                    log::info!("clean up");
+                }
+            }
+        };
+
         Ok(())
     }
 }
