@@ -1,7 +1,11 @@
 use crate::{cache::Cache, map::Flags, store::Store};
 use lazy_static::lazy_static;
+use nbd_async::{BlockDevice, Control};
 use prometheus::{register_histogram, register_int_counter, Histogram, IntCounter};
-use std::io;
+use std::{
+    io,
+    time::{Duration, Instant},
+};
 
 lazy_static! {
     static ref IO_READ_BYTES: IntCounter =
@@ -82,6 +86,17 @@ impl FlushRange {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+
+pub enum DeviceControl {
+    Evict(Duration),
+}
+
+impl DeviceControl {
+    pub fn evict(after: Duration) -> Self {
+        DeviceControl::Evict(after)
+    }
+}
 /// implementation of the nbd device
 ///
 /// The device mainly works against a cache object
@@ -92,6 +107,7 @@ where
 {
     cache: Cache<S>,
     flush: FlushRange,
+    atime: Instant,
 }
 
 impl<S> Device<S>
@@ -102,6 +118,7 @@ where
         Self {
             cache,
             flush: FlushRange::default(),
+            atime: Instant::now(),
         }
     }
 
@@ -166,14 +183,23 @@ where
 
         Ok(())
     }
+
+    // evict whatever you can in 50 milliseconds
+    async fn evict(&mut self) -> io::Result<()> {
+        self.cache
+            .evict(Duration::from_millis(50))
+            .await
+            .map_err(io::Error::from)
+    }
 }
 
 #[async_trait::async_trait(?Send)]
-impl<S> nbd_async::BlockDevice for Device<S>
+impl<S> BlockDevice<DeviceControl> for Device<S>
 where
     S: Store,
 {
     async fn read(&mut self, offset: u64, buf: &mut [u8]) -> io::Result<()> {
+        self.atime = Instant::now();
         let _timer = IO_READ_HISTOGRAM.start_timer();
         match self.inner_read(offset, buf).await {
             Ok(_) => {
@@ -192,6 +218,7 @@ where
 
     /// Write a block of data at offset.
     async fn write(&mut self, offset: u64, buf: &[u8]) -> io::Result<()> {
+        self.atime = Instant::now();
         let _timer = IO_WRITE_HISTOGRAM.start_timer();
         match self.inner_write(offset, buf).await {
             Ok(_) => {
@@ -211,6 +238,23 @@ where
     async fn flush(&mut self) -> io::Result<()> {
         DEVICE_FLUSH.inc();
         self.cache.flush()?;
+        Ok(())
+    }
+
+    /// called if a new control message is available on control stream
+    async fn control(&mut self, control: &Control<DeviceControl>) -> io::Result<()> {
+        match control {
+            Control::Shutdown => {}
+            Control::Notify(DeviceControl::Evict(duration)) => {
+                // only if no read/write operations happening in
+                // duration time we can call cleanup
+                if self.atime.elapsed() > *duration {
+                    log::trace!("background eviction");
+                    self.evict().await?;
+                }
+            }
+        };
+
         Ok(())
     }
 }

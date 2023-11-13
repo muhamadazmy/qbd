@@ -6,7 +6,11 @@
 //! of blocks supported by the nbd device. If using block size of
 //! 1MiB this maps to 4096TiB
 //!
-use std::{num::NonZeroUsize, path::Path};
+use std::{
+    num::NonZeroUsize,
+    path::Path,
+    time::{Duration, Instant},
+};
 
 use crate::{
     map::{Flags, Page, PageMut},
@@ -227,6 +231,27 @@ where
 
     pub fn flush_range(&self, location: usize, count: usize) -> Result<()> {
         self.map.flush_range_async(location, count)
+    }
+
+    // try evicting whatever it can in no_longer_than
+    pub async fn evict(&mut self, no_longer_than: Duration) -> Result<()> {
+        let start = Instant::now();
+        for (page_index, cached) in self.cache.iter().rev() {
+            log::trace!("check page {} for eviction", *page_index);
+            let mut page = self.map.at_mut(cached.address);
+            if page.header().flag(Flags::Dirty) {
+                PAGES_EVICTED.inc();
+                log::trace!("background eviction of {}", *page_index);
+                self.store.set(*page_index, page.data()).await?;
+                page.header_mut().set(Flags::Dirty, false);
+            }
+
+            if start.elapsed() > no_longer_than {
+                return Ok(());
+            }
+        }
+
+        Ok(())
     }
 }
 

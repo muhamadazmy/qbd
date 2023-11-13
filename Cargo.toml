@@ -14,10 +14,10 @@ path="src/main.rs"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-nbd-async = "0.6.0"
+nbd-async = { git = "https://github.com/muhamadazmy/nbd-async.git", branch="main" } #"0.6.0"
 memmap2 = "0.7"
 async-trait = "0.1"
-tokio = { version = "1.29", features=["rt", "macros", "rt-multi-thread", "io-std", "fs"] }
+tokio = { version = "1.29", features=["rt", "macros", "rt-multi-thread", "io-std", "fs", "sync", "signal"] }
 thiserror = "1"
 lru = "0.12"
 crc = "3.0.1"
@@ -34,6 +34,7 @@ url = "2.4"
 nix = {version = "0.27", features = ["fs"] }
 sled = {version = "0.34", features = ["io_uring"] }
 binary-layout = "3.2"
+tokio-stream = "0.1"
 
 [build-dependencies]
 git-version = "0.3"

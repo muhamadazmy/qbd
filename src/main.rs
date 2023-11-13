@@ -1,11 +1,22 @@
 use anyhow::Context;
 use bytesize::ByteSize;
 use clap::{ArgAction, Parser};
+use nbd_async::Control;
 use qbd::{
+    device::DeviceControl,
     store::{ConcatStore, FileStore, Store},
     *,
 };
-use std::{fmt::Display, future, net::SocketAddr, path::PathBuf, str::FromStr, sync::Arc};
+use std::{
+    fmt::Display, future, net::SocketAddr, path::PathBuf, str::FromStr, sync::Arc, time::Duration,
+};
+use tokio::sync::mpsc::{channel, Sender};
+use tokio_stream::wrappers::ReceiverStream;
+
+/// Send an evict control signal to the device every 500 milliseconds
+/// the device can choose to ignore that
+const EVICT_DURATION: Duration = Duration::from_millis(500);
+
 /// This wrapper is only to overcome the default
 /// stupid format of ByteSize which uses MB/GB units instead
 /// of MiB/GiB units
@@ -119,6 +130,24 @@ async fn app(args: Args) -> anyhow::Result<()> {
         ));
     }
 
+    let (ctl, recv) = channel(1);
+
+    handle_signals(ctl.clone()).context("handling hangup signals")?;
+
+    tokio::spawn(async move {
+        // this keep sending control jobs to the device.
+        // we attach a device control object carries a command (evict).
+        // the device will only handle this is if it has been
+        // ideal for that evict_duration
+        let msg = DeviceControl::evict(EVICT_DURATION);
+        loop {
+            if ctl.send(Control::Notify(msg)).await.is_err() {
+                break;
+            }
+            tokio::time::sleep(EVICT_DURATION).await;
+        }
+    });
+
     let nbd_bs = ByteSize::kib(4);
     nbd_async::serve_local_nbd(
         args.nbd,
@@ -126,8 +155,31 @@ async fn app(args: Args) -> anyhow::Result<()> {
         disk_size.0 / nbd_bs.0,
         false,
         device,
+        ReceiverStream::new(recv),
     )
     .await?;
+
+    log::info!("shutting down");
+    Ok(())
+}
+
+fn handle_signals(ctr: Sender<Control<DeviceControl>>) -> Result<()> {
+    use tokio::signal::unix::{signal, SignalKind};
+
+    // it's stupid we can't have one channel for all signals
+    let mut hu = signal(SignalKind::hangup())?;
+    let mut iu = signal(SignalKind::interrupt())?;
+    let mut te = signal(SignalKind::terminate())?;
+
+    tokio::spawn(async move {
+        tokio::select! {
+            _ = hu.recv() => {},
+            _ = iu.recv() => {},
+            _ = te.recv() => {},
+        }
+
+        let _ = ctr.send(Control::Shutdown).await;
+    });
 
     Ok(())
 }
