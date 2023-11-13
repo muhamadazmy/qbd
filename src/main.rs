@@ -3,7 +3,7 @@ use bytesize::ByteSize;
 use clap::{ArgAction, Parser};
 use nbd_async::Control;
 use qbd::{
-    device::Notify,
+    device::DeviceControl,
     store::{ConcatStore, FileStore, Store},
     *,
 };
@@ -13,7 +13,9 @@ use std::{
 use tokio::sync::mpsc::{channel, Sender};
 use tokio_stream::wrappers::ReceiverStream;
 
-const JANITOR_DURATION: Duration = Duration::from_secs(1);
+/// Send an evict control signal to the device every 500 milliseconds
+/// the device can choose to ignore that
+const EVICT_DURATION: Duration = Duration::from_millis(500);
 
 /// This wrapper is only to overcome the default
 /// stupid format of ByteSize which uses MB/GB units instead
@@ -133,14 +135,16 @@ async fn app(args: Args) -> anyhow::Result<()> {
     handle_signals(ctl.clone()).context("handling hangup signals")?;
 
     tokio::spawn(async move {
-        // this keep sending notify jobs to the device.
-        // we attach a notify object carries a duration.
+        // this keep sending control jobs to the device.
+        // we attach a device control object carries a command (evict).
         // the device will only handle this is if it has been
-        // ideal for that long
-        let notify = Notify::ideal(JANITOR_DURATION);
+        // ideal for that evict_duration
+        let msg = DeviceControl::evict(EVICT_DURATION);
         loop {
-            ctl.send(Control::Notify(notify)).await.unwrap();
-            tokio::time::sleep(JANITOR_DURATION).await;
+            if ctl.send(Control::Notify(msg)).await.is_err() {
+                break;
+            }
+            tokio::time::sleep(EVICT_DURATION).await;
         }
     });
 
@@ -159,7 +163,7 @@ async fn app(args: Args) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn handle_signals(ctr: Sender<Control<Notify>>) -> Result<()> {
+fn handle_signals(ctr: Sender<Control<DeviceControl>>) -> Result<()> {
     use tokio::signal::unix::{signal, SignalKind};
 
     // it's stupid we can't have one channel for all signals

@@ -88,13 +88,13 @@ impl FlushRange {
 
 #[derive(Debug, Clone, Copy)]
 
-pub enum Notify {
-    Ideal(Duration),
+pub enum DeviceControl {
+    Evict(Duration),
 }
 
-impl Notify {
-    pub fn ideal(after: Duration) -> Self {
-        Notify::Ideal(after)
+impl DeviceControl {
+    pub fn evict(after: Duration) -> Self {
+        DeviceControl::Evict(after)
     }
 }
 /// implementation of the nbd device
@@ -183,10 +183,18 @@ where
 
         Ok(())
     }
+
+    // evict whatever you can in 50 milliseconds
+    async fn evict(&mut self) -> io::Result<()> {
+        self.cache
+            .evict(Duration::from_millis(50))
+            .await
+            .map_err(io::Error::from)
+    }
 }
 
 #[async_trait::async_trait(?Send)]
-impl<S> BlockDevice<Notify> for Device<S>
+impl<S> BlockDevice<DeviceControl> for Device<S>
 where
     S: Store,
 {
@@ -234,12 +242,15 @@ where
     }
 
     /// called if a new control message is available on control stream
-    async fn control(&mut self, control: &Control<Notify>) -> io::Result<()> {
+    async fn control(&mut self, control: &Control<DeviceControl>) -> io::Result<()> {
         match control {
             Control::Shutdown => {}
-            Control::Notify(Notify::Ideal(duration)) => {
+            Control::Notify(DeviceControl::Evict(duration)) => {
+                // only if no read/write operations happening in
+                // duration time we can call cleanup
                 if self.atime.elapsed() > *duration {
-                    log::info!("clean up");
+                    log::trace!("background eviction");
+                    self.evict().await?;
                 }
             }
         };
