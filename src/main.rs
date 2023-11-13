@@ -72,7 +72,7 @@ struct Args {
     disable_metrics: bool,
 
     /// enable debugging logs
-    #[clap(long, action=ArgAction::Count)]
+    #[clap(short, long, action=ArgAction::Count)]
     debug: u8,
 }
 

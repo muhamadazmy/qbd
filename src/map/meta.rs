@@ -9,7 +9,7 @@ define_layout!(meta, BigEndian, {
     magic: u32,
     version: u32,
     page_size: u64,
-    full_size: u64,
+    data_size: u64,
 });
 
 /// full size of the meta object
@@ -32,7 +32,7 @@ impl Meta {
         view.magic_mut().write(MAGIC);
         view.version_mut().write(self.version);
         view.page_size_mut().write(self.page_size);
-        view.full_size_mut().write(self.data_size);
+        view.data_size_mut().write(self.data_size);
 
         Ok(())
     }
@@ -51,7 +51,7 @@ impl Meta {
         Ok(Meta {
             version: VERSION,
             page_size: view.page_size().read(),
-            data_size: view.full_size().read(),
+            data_size: view.data_size().read(),
         })
     }
 }
