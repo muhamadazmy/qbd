@@ -38,7 +38,7 @@ The page size is very important because a page is the unit that is written to th
 
 ## Device and Cache
 
-We split the device into virtual pages (or pages for short). For example if we have a 100mib device, with a page size of `1mib` then we have 10 pages. The pages then are indexed from 0 to 9.
+We split the device into virtual pages (or pages for short). For example if we have a 10mib device, with a page size of `1mib` then we have 10 pages. The pages then are indexed from 0 to 9.
 
 When a part of the device is being accessed (read/or write) we figure out which page this operation falls into, the cache is then consulted to see if we already have this page in cache.
 
