@@ -53,8 +53,9 @@ struct Args {
     #[arg(long, default_value_t=BSWrapper(bytesize::ByteSize::gib(10)))]
     cache_size: BSWrapper,
 
-    /// page size used for both cache and storage
-    #[arg(long, default_value_t=BSWrapper(bytesize::ByteSize::mib(1)))]
+    /// page size used for both cache and storage. A page size of 256kib allow
+    /// the device max size of 1024TiB
+    #[arg(long, default_value_t=BSWrapper(bytesize::ByteSize::kib(256)))]
     page_size: BSWrapper,
 
     /// url to backend store as `file:///path/to/file?size=SIZE`
