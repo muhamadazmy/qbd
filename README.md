@@ -82,3 +82,7 @@ This will start the service for `/dev/nbd0`, the size of the device will be `200
 - After the first first creation sizes should never be changed. Changing `cache-size`, or `page-size` will render the entire cache invalid which will cause loss of data. Same applies to `store` size. But it's possible to extend the device by adding extra store.
 - The order of how the `--store` are provided matters. in the example above `disk.sig0` comes before `disk.sig1` changing the order in a next run will again cause data loss
 - We will add protection against those kind of mistakes later on
+
+## Performance
+
+Please check [test results here](fio.md)
