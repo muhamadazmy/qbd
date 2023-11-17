@@ -44,7 +44,7 @@ impl Store for FileStore {
         self.map.flush_page(index as usize)
     }
 
-    async fn get(&self, index: u32) -> Result<Option<Data<Self::Vec>>> {
+    async fn get(&self, index: u32) -> Result<Option<Page<Self::Vec>>> {
         // we access the map directly to avoid a borrow problem
         let header = self.map.header_at(index as usize);
         if !header.flag(Flags::Occupied) {
@@ -53,14 +53,14 @@ impl Store for FileStore {
 
         let data = self.map.data_at(index as usize);
 
-        Ok(Some(Data::Borrowed(data)))
+        Ok(Some(Page::Borrowed(data)))
     }
 
     fn size(&self) -> ByteSize {
         self.size
     }
 
-    fn block_size(&self) -> usize {
+    fn page_size(&self) -> usize {
         self.map.page_size()
     }
 }

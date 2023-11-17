@@ -44,11 +44,11 @@ impl Store for SledStore {
         Ok(())
     }
 
-    async fn get(&self, index: u32) -> Result<Option<Data<Self::Vec>>> {
+    async fn get(&self, index: u32) -> Result<Option<Page<Self::Vec>>> {
         if index >= self.bc {
             return Err(Error::PageIndexOutOfRange);
         }
-        let data = self.db.get(index.to_be_bytes())?.map(Data::Owned);
+        let data = self.db.get(index.to_be_bytes())?.map(Page::Owned);
 
         Ok(data)
     }
@@ -57,7 +57,7 @@ impl Store for SledStore {
         self.size
     }
 
-    fn block_size(&self) -> usize {
+    fn page_size(&self) -> usize {
         self.bs.0 as usize
     }
 }

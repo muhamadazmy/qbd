@@ -9,6 +9,12 @@ pub mod map;
 pub mod store;
 
 #[derive(thiserror::Error, Debug)]
+pub enum PolicyError {
+    #[error("stores not same size")]
+    StoresNotSameSize,
+}
+
+#[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("size cannot be zero")]
     ZeroSize,
@@ -49,6 +55,9 @@ pub enum Error {
 
     #[error("invalid meta data size")]
     InvalidMetaDataSize,
+
+    #[error("policy error: {0}")]
+    PolicyError(#[from] PolicyError),
 
     #[error("io error: {0}")]
     IO(#[from] IoError),

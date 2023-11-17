@@ -4,7 +4,7 @@ use clap::{ArgAction, Parser};
 use nbd_async::Control;
 use qbd::{
     device::DeviceControl,
-    store::{ConcatStore, FileStore, Store},
+    store::{policy::Policy, FileStore, Store},
     *,
 };
 use std::{
@@ -106,7 +106,7 @@ async fn app(args: Args) -> anyhow::Result<()> {
         );
     }
 
-    let store = ConcatStore::new(stores)?;
+    let store = Policy::strip(stores)?;
 
     let disk_size = store.size();
     log::info!(

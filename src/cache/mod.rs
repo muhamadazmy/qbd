@@ -14,7 +14,7 @@ use std::{
 
 use crate::{
     map::{Flags, Page, PageMut},
-    store::{Data, Store},
+    store::{Page as PageData, Store},
 };
 
 use super::map::PageMap;
@@ -264,14 +264,14 @@ impl Store for NullStore {
     async fn set(&mut self, _index: u32, _block: &[u8]) -> Result<()> {
         Ok(())
     }
-    async fn get(&self, _index: u32) -> Result<Option<Data<Self::Vec>>> {
+    async fn get(&self, _index: u32) -> Result<Option<PageData<Self::Vec>>> {
         Ok(None)
     }
     fn size(&self) -> ByteSize {
         ByteSize::b(u64::MAX)
     }
 
-    fn block_size(&self) -> usize {
+    fn page_size(&self) -> usize {
         0
     }
 }
