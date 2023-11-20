@@ -27,11 +27,11 @@ impl<'a> Deref for Page<'a> {
     }
 }
 
-impl<'a> Into<Vec<u8>> for Page<'a> {
-    fn into(self) -> Vec<u8> {
-        match self {
-            Self::Owned(v) => v,
-            Self::Borrowed(v) => v.into(),
+impl<'a> From<Page<'a>> for Vec<u8> {
+    fn from(value: Page<'a>) -> Self {
+        match value {
+            Page::Borrowed(v) => v.into(),
+            Page::Owned(v) => v,
         }
     }
 }

@@ -26,8 +26,7 @@ fn mirror<S: Store>(mut store: S) -> Channel<Request> {
         while let Some(request) = rx.recv().await {
             match request {
                 Request::Get { index, reply_on } => {
-                    let result: Result<Option<Vec<u8>>> =
-                        store.get(index).await.map(|v| v.map(|d| d.into()));
+                    let result = store.get(index).await.map(|v| v.map(Vec::<u8>::from));
 
                     let _ = reply_on.send(result);
                 }
@@ -77,11 +76,7 @@ impl MirrorPolicy {
             channels.push(ch);
         }
 
-        Ok(Self {
-            bs,
-            size: size,
-            channels,
-        })
+        Ok(Self { bs, size, channels })
     }
 }
 
@@ -99,7 +94,7 @@ impl Store for MirrorPolicy {
             let (tx, rx) = tokio::sync::oneshot::channel();
 
             let request = Request::Set {
-                index: index,
+                index,
                 page: Arc::clone(&page),
                 reply_on: tx,
             };
@@ -121,9 +116,7 @@ impl Store for MirrorPolicy {
                 .context("joining set request")?
                 .context("receive response from mirrored store")?;
 
-            if result.is_err() {
-                return result;
-            }
+            result?;
         }
 
         // all write operation succeeded
@@ -140,7 +133,7 @@ impl Store for MirrorPolicy {
             let (tx, rx) = tokio::sync::oneshot::channel();
 
             let request = Request::Get {
-                index: index,
+                index,
                 reply_on: tx,
             };
 
@@ -167,7 +160,7 @@ impl Store for MirrorPolicy {
                     continue;
                 }
                 Ok(result) => {
-                    return Ok(result.map(|v| Page::Owned(v)));
+                    return Ok(result.map(Page::Owned));
                 }
             }
         }
