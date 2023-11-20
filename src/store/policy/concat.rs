@@ -32,8 +32,6 @@ impl<S> Store for ConcatPolicy<S>
 where
     S: Store,
 {
-    type Vec = S::Vec;
-
     async fn set(&mut self, index: u32, page: &[u8]) -> Result<()> {
         let mut index = index as usize;
         for store in self.parts.iter_mut() {
@@ -48,7 +46,7 @@ where
         Err(Error::PageIndexOutOfRange)
     }
 
-    async fn get(&self, index: u32) -> Result<Option<Page<Self::Vec>>> {
+    async fn get(&self, index: u32) -> Result<Option<Page>> {
         let mut index = index as usize;
         for store in self.parts.iter() {
             let bc = store.size().0 as usize / self.ps;

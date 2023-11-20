@@ -49,8 +49,6 @@ impl<S> Store for StripPolicy<S>
 where
     S: Store,
 {
-    type Vec = S::Vec;
-
     async fn set(&mut self, index: u32, page: &[u8]) -> Result<()> {
         if index as u64 >= self.size.0 {
             return Err(Error::PageIndexOutOfRange);
@@ -62,7 +60,7 @@ where
         self.parts[outer].set(inner as u32, page).await
     }
 
-    async fn get(&self, index: u32) -> Result<Option<Page<Self::Vec>>> {
+    async fn get(&self, index: u32) -> Result<Option<Page>> {
         if index as u64 >= self.size.0 {
             return Err(Error::PageIndexOutOfRange);
         }

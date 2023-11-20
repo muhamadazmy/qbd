@@ -4,28 +4,20 @@ use std::ops::Deref;
 
 mod file;
 pub mod policy;
-mod sled_store;
 
 use crate::{Error, Result};
 use bytesize::ByteSize;
 pub use file::FileStore;
-pub use sled_store::SledStore;
 
 /// Data is like built in Cow but read only
 /// this allow stores to return data with no copy
 /// if possible
-pub enum Page<'a, T>
-where
-    T: Deref<Target = [u8]>,
-{
-    Owned(T),
+pub enum Page<'a> {
+    Owned(Vec<u8>),
     Borrowed(&'a [u8]),
 }
 
-impl<'a, T> Deref for Page<'a, T>
-where
-    T: Deref<Target = [u8]>,
-{
+impl<'a> Deref for Page<'a> {
     type Target = [u8];
     fn deref(&self) -> &Self::Target {
         match self {
@@ -35,15 +27,22 @@ where
     }
 }
 
+impl<'a> Into<Vec<u8>> for Page<'a> {
+    fn into(self) -> Vec<u8> {
+        match self {
+            Self::Owned(v) => v,
+            Self::Borrowed(v) => v.into(),
+        }
+    }
+}
+
 #[async_trait::async_trait]
 pub trait Store: Send + Sync + 'static {
-    type Vec: Deref<Target = [u8]>;
-
     /// set a page it the store
     async fn set(&mut self, index: u32, page: &[u8]) -> Result<()>;
 
     /// get a page from the store
-    async fn get(&self, index: u32) -> Result<Option<Page<Self::Vec>>>;
+    async fn get(&self, index: u32) -> Result<Option<Page>>;
 
     /// size of the store
     fn size(&self) -> ByteSize;
@@ -76,13 +75,12 @@ mod test {
     }
     #[async_trait::async_trait]
     impl Store for InMemory {
-        type Vec = Vec<u8>;
         async fn set(&mut self, index: u32, page: &[u8]) -> Result<()> {
             self.mem.insert(index, Vec::from(page));
             Ok(())
         }
 
-        async fn get(&self, index: u32) -> Result<Option<Page<Self::Vec>>> {
+        async fn get(&self, index: u32) -> Result<Option<Page>> {
             Ok(self.mem.get(&index).map(|d| Page::Borrowed(&d)))
         }
 

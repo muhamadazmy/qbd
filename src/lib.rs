@@ -1,4 +1,5 @@
 use std::{
+    any,
     io::{Error as IoError, ErrorKind},
     path::PathBuf,
 };
@@ -35,9 +36,6 @@ pub enum Error {
     #[error("page size must be multiple of block size")]
     SizeNotMultipleOfPageSize,
 
-    #[error("sled db error: {0}")]
-    Sled(#[from] sled::Error),
-
     #[error("size change to file {0}")]
     SizeChanged(PathBuf),
 
@@ -61,6 +59,9 @@ pub enum Error {
 
     #[error("io error: {0}")]
     IO(#[from] IoError),
+
+    #[error("unknown error: {0}")]
+    Other(#[from] anyhow::Error),
 }
 
 impl From<Error> for std::io::Error {

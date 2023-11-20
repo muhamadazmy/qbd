@@ -23,8 +23,6 @@ impl FileStore {
 
 #[async_trait::async_trait]
 impl Store for FileStore {
-    type Vec = Vec<u8>;
-
     async fn set(&mut self, index: u32, data: &[u8]) -> Result<()> {
         if data.len() != self.map.page_size() {
             return Err(Error::InvalidPageSize);
@@ -44,7 +42,7 @@ impl Store for FileStore {
         self.map.flush_page(index as usize)
     }
 
-    async fn get(&self, index: u32) -> Result<Option<Page<Self::Vec>>> {
+    async fn get(&self, index: u32) -> Result<Option<Page>> {
         // we access the map directly to avoid a borrow problem
         let header = self.map.header_at(index as usize);
         if !header.flag(Flags::Occupied) {

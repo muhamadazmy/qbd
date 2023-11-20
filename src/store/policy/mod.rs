@@ -5,10 +5,12 @@
 //! for example a ConcatStore appends 2 or more stores together so that
 //! they appear as a bigger single store.
 mod concat;
+mod mirror;
 mod strip;
 
 use bytesize::ByteSize;
 pub use concat::ConcatPolicy;
+pub use mirror::MirrorPolicy;
 pub use strip::StripPolicy;
 
 use super::{Page, Store};
@@ -20,6 +22,7 @@ where
 {
     Concat(ConcatPolicy<S>),
     Strip(StripPolicy<S>),
+    Mirror(MirrorPolicy),
 }
 
 impl<S> Policy<S>
@@ -35,6 +38,10 @@ where
     pub fn strip(parts: Vec<S>) -> Result<Self> {
         Ok(Self::Strip(StripPolicy::new(parts)?))
     }
+
+    pub fn mirror(parts: Vec<S>) -> Result<Self> {
+        Ok(Self::Mirror(MirrorPolicy::new(parts)?))
+    }
 }
 
 #[async_trait::async_trait]
@@ -42,21 +49,21 @@ impl<S> Store for Policy<S>
 where
     S: Store,
 {
-    type Vec = S::Vec;
-
     /// set a page it the store
     async fn set(&mut self, index: u32, page: &[u8]) -> Result<()> {
         match self {
             Self::Concat(inner) => inner.set(index, page).await,
             Self::Strip(inner) => inner.set(index, page).await,
+            Self::Mirror(inner) => inner.set(index, page).await,
         }
     }
 
     /// get a page from the store
-    async fn get(&self, index: u32) -> Result<Option<Page<Self::Vec>>> {
+    async fn get(&self, index: u32) -> Result<Option<Page>> {
         match self {
             Self::Concat(inner) => inner.get(index).await,
             Self::Strip(inner) => inner.get(index).await,
+            Self::Mirror(inner) => inner.get(index).await,
         }
     }
 
@@ -65,6 +72,7 @@ where
         match self {
             Self::Concat(inner) => inner.size(),
             Self::Strip(inner) => inner.size(),
+            Self::Mirror(inner) => inner.size(),
         }
     }
 
@@ -73,6 +81,7 @@ where
         match self {
             Self::Concat(inner) => inner.page_size(),
             Self::Strip(inner) => inner.page_size(),
+            Self::Mirror(inner) => inner.page_size(),
         }
     }
 }

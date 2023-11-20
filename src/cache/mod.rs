@@ -259,14 +259,14 @@ pub struct NullStore;
 
 #[async_trait::async_trait]
 impl Store for NullStore {
-    type Vec = Vec<u8>;
-
     async fn set(&mut self, _index: u32, _block: &[u8]) -> Result<()> {
         Ok(())
     }
-    async fn get(&self, _index: u32) -> Result<Option<PageData<Self::Vec>>> {
+
+    async fn get(&self, _index: u32) -> Result<Option<PageData>> {
         Ok(None)
     }
+
     fn size(&self) -> ByteSize {
         ByteSize::b(u64::MAX)
     }
