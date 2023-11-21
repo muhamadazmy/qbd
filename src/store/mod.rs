@@ -1,13 +1,15 @@
 //use std::io::Error;
+use crate::{Error, Result};
+use bytesize::ByteSize;
 use std::io::Error as IoError;
 use std::ops::Deref;
 
 mod file;
 pub mod policy;
+mod sql;
 
-use crate::{Error, Result};
-use bytesize::ByteSize;
 pub use file::FileStore;
+pub use sql::SqliteStore;
 
 /// Data is like built in Cow but read only
 /// this allow stores to return data with no copy

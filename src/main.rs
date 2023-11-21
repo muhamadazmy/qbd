@@ -199,6 +199,7 @@ async fn main() -> anyhow::Result<()> {
                 _ => log::LevelFilter::Trace,
             }
         })
+        .with_module_level("sqlx", log::LevelFilter::Error)
         .init()?;
 
     if let Err(err) = app(args).await {

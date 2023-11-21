@@ -79,3 +79,32 @@ where
         self.bs
     }
 }
+
+#[cfg(test)]
+mod test {
+    use std::ops::Deref;
+
+    use crate::store::InMemory;
+
+    use super::{Store, StripPolicy};
+
+    #[tokio::test]
+    async fn stripping() {
+        let parts = vec![InMemory::new(10), InMemory::new(10)];
+
+        let mut stripping = StripPolicy::new(parts).unwrap();
+
+        stripping.set(0, "hello".as_bytes()).await.unwrap();
+        stripping.set(1, "world".as_bytes()).await.unwrap();
+
+        assert_eq!(
+            stripping.parts[0].get(0).await.unwrap().unwrap().deref(),
+            "hello".as_bytes()
+        );
+
+        assert_eq!(
+            stripping.parts[1].get(0).await.unwrap().unwrap().deref(),
+            "world".as_bytes()
+        );
+    }
+}
