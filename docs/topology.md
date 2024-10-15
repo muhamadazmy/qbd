@@ -3,7 +3,7 @@
 ## MagicCloud Edge Cluster
 
 
-Our MagicCloud series leverages the same advanced technology used in the larger <a href="https://threefold.info/datacenter/" target="_blank">Tier-S Datacenter</a> concept, but is specifically designed for remote offices or edge locations.
+Our MagicCloud series leverages the same advanced technology used in the larger <a href="https://threefold.info/datacenter/" target="_blank">Tier-S Datacenter</a> concept, but is specifically designed for remote offices and/or edge locations.
 
 **We call the product Magiccloud because if its truly unique magical features**
 
@@ -44,10 +44,10 @@ The capacity per cluster is incredible:
 - **2.5 gbit internet routing & firewall infrastructure**
 - **+200 TOPS** (Tera Operations Per Second) for AI tasks
 
-## Early Adopter Sale
+## Register for our first batch.
 
-- We are organizing a pre-sale, with an estimated delivery time of 4 to 6 months.
-- Once we reach 100 clusters, the manufacturing process will commence in collaboration with a chosen ODM (Original Device Manufacturer).
+- We are organizing the manufactoring of a first batch, with an estimated delivery time of 4 to 6 months.
+- Once we reach 100 clusters, the manufacturing process will start in collaboration with a chosen ODM (Original Device Manufacturer).
 - Pricing per cluster is 16,000 EUR, with an additional 500 EUR/month for maintenance, upgrades, and monitoring.
 - Our Zero-OS & TFGrid version used is 4.0 (our latest generation which has quite some add ons to support this usecase)
 
