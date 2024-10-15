@@ -50,7 +50,7 @@ The capacity per cluster is incredible:
 
 - We are organizing a pre-sale, with an estimated delivery time of 4 to 6 months.
 - Once we reach 100 clusters, the manufacturing process will commence in collaboration with a chosen ODM (Original Device Manufacturer).
-- Pricing per cluster is 16,000 EUR, with an additional 600 EUR/month for maintenance, upgrades, and monitoring.
+- Pricing per cluster is 16,000 EUR, with an additional 500 EUR/month for maintenance, upgrades, and monitoring.
 - Our Zero-OS & TFGrid version used is 4.0 (our latest generation which has quite some add ons to support this usecase)
 
 > Question: how reliable is this solution? Please, checkout our public available cloud which is running as non commercial opensource project on https://www.threefold.io, this is now running for years and thousands of people use it.
@@ -64,9 +64,10 @@ The capacity per cluster is incredible:
 - All management done by people and quite manual or needs additional automation frameworks which add to complexity, cost and less security.
 - So many features missing e.g. self healing, ... 
 - Very expensive: 
-  - VMWare new licensing for a cluster of this size would be: +3,000 USD per month for this config easily
+  - VMWare new licensing for a cluster of this size would be: +3,000 USD per month for this config
+    - (28*5)cores * 350 usd per year = 50,400 USD / year for their most advanced offering
   - Hardware: +50,000 USD but can be much more
-  - Management, Monitoring, Automation all additional cost
+  - If a need for 3e party Management, Monitoring, Automation would all be at additional cost
 
 **Magic Cloud Edge Cluster is**
 
