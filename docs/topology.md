@@ -1,6 +1,48 @@
 
 ## MagicCloud Edge Cluster
 
+We support upto 5 nodes per Edge Cluster. Each node is a powerful machine interconnected over 40 gbit with the other machines.
+
+There is an integrates switch/router which takes care of the communication to the internet.
+
+If a node is down it can easly be changes, the total power consumption of a cluster (5 nodes) might be less than 500 watt.
+
+## Use Cases
+
+- high performance blockchain +1,000 TPS (supports hundreds of MagiCloud Edge Clusters)
+- high performance database workloads, super redundant with master, and readonly followers over multiple locations which gives super fast read performance on each edge location.
+- windows/linux VM's & Containers with integrated redundant block devices
+- integrated Quantum Safe Network and Quantum Safe Storage (archive, fileservers, ...)
+- edge applications
+- integrates with our MagicCloud Smart Contract for IT system
+- AI interference (not high performance though but enough for many workloads)
+- Serverless functions, program different and scale unlimited while providing high security.
+
+
+These configurations are ideal for edge locations, they are cost effective yet still super efficient and high performance.
+
+### Blockchain
+
+They will especially well act as blockchain nodes, the deployed private blockchain is multi technology:
+
+- Dfinity, The Internet Computer, very capable blockchain technology. The smart contract language of Dfinity is called [Motoko](https://internetcomputer.org/docs/current/motoko/main/getting-started/motoko-introduction) and very capable and can do more than just blockchain.
+- Private SUI blockchain, supports the [Move Language](https://move-language.github.io/move/) which is a good smart contract language.
+- EVM compatible chains (less performing but quite stnd)
+
+### Serverless Functions
+
+We also optimized for serverless functions based on multiple languages
+
+- Vlang
+- WebAssembly
+- ... 
+
+### VM's & Container
+
+- support Kubernetes, Docker or our own VM & Container technology
+- full deterministic deployments are possible
+
+## Architecture
 
 ```mermaid
 flowchart TB
@@ -69,11 +111,6 @@ flowchart TB
 
 ```
 
-- Each cluster is a highly efficient cluster in 1 chassis
-- Each node is plugeable to be inserted in the cluster chassis
-- The cluster has redundant power supply
-- The cluster has integrated redundant switch/router for the connection to internet.
-- The cluster has a 40 Gbit backplane for the internal communication, acts as a circle and as such is fully redundant. This 40 gbit backplane is used for the communication between the nodes in the cluster for storage and internal networking e.g. for the blockchain.
 
 ## capacity of 1 cluster
 
@@ -98,12 +135,13 @@ Details:
 - < 100 watt per node
 
 
-## Example usecases
 
-- high performance blockchain +1,000 TPS (supports hundreds of MagiCloud Edge Clusters)
-- high performance database workloads, super redundant with master, and readonly followers over multiple locations which gives super fast read performance on each edge location.
-- windows/linux VM's & Containers with integrated redundant block devices
-- integrated Quantum Safe Network and Quantum Safe Storage (archive, fileservers, ...)
-- edge applications
-- integrates with our MagicCloud Smart Contract for IT system
-- AI interference (not high performance though but enough for many workloads)
+## Planned hardware configuration
+
+We are looking for an ODM to develop following config
+
+- Each cluster is a highly efficient cluster in 1 chassis
+- Each node is plugeable to be inserted in the cluster chassis
+- The cluster has redundant power supply
+- The cluster has integrated redundant switch/router for the connection to internet.
+- The cluster has a 40 Gbit backplane for the internal communication, acts as a circle and as such is fully redundant. This 40 gbit backplane is used for the communication between the nodes in the cluster for storage and internal networking e.g. for the blockchain.
