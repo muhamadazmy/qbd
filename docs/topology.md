@@ -2,9 +2,10 @@
 
 ## MagicCloud Edge Cluster
 
-Our MagicCloud series is our technology as is used in the larger <a href="https://threefold.info/datacenter/" target="_blank">Tier-S Datacenter</a> concept but applicable for remote offices or edge locations.
 
-We call the product Magiccloud because if its truly unique magical features
+Our MagicCloud series leverages the same advanced technology used in the larger <a href="https://threefold.info/datacenter/" target="_blank">Tier-S Datacenter</a> concept, but is specifically designed for remote offices or edge locations.
+
+**We call the product Magiccloud because if its truly unique magical features**
 
 
 - **Self-healing capabilities**
@@ -32,9 +33,6 @@ We call the product Magiccloud because if its truly unique magical features
   - There are clients for windows, osx, linux, mobile phones, ...
 - **integrated monitoring & management**
 
----
-
-Let me know if you'd like further tweaks!
 ## capacity of 1 cluster
 
 The capacity per cluster is incredible:
